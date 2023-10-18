@@ -1,0 +1,457 @@
+= DB Link
+:toc:
+:toc-title: 목차
+
+== 1. DB Link란?
+데이터베이스 세션 내에서 다른 PostgreSQL 데이터베이스 에 대한 연결을 지원하는 모듈 + 
+확장 모듈 설치가 필요하다. + 
+
+== 2. DB Link 기능
+=== *`dblink_connect`* 
+— 원격 데이터베이스에 대한 지속적인 연결을 엽니다. + 
+
+- 개요
+[source, sql]
+----
+dblink_connect(text connstr) returns text
+dblink_connect(text connname, text connstr) returns text
+----
+
+- 파라미터 종류 + 
+* `connname` - 커넥션의 이름입니다. 생략할 경우 이름이 지정되지 않으며, 이름이 없는 커넥션은 1개만 만들 수 있어, 새로 생성할 경우 기존의 연결을 대체합니다. + 
+
+* `connstr` - libpq스타일의 커넥션 정보 문자열입니다. +
+** 예시 : hostaddr=127.0.0.1 port=5432 dbname=mydb user=postgres password=mypasswd options=-csearch_path= 
+- 사용 예시 + 
+[source, sql]
+----
+postgres=# SELECT dblink_connect('dbltest', 'host=210.106.105.55 user=postgres password=1234 dbname=postgres port=5432');
+----  
+
+
+
+
+=== *`dblink_connect_u`* 
+— 원격 데이터베이스에 대한 안전하지 않은 지속적인 연결을 오픈합니다. + 
+`dblink_connect` 는 Superuser만 커넥션에 trust 인증을 사용할 수 있지만, +
+`dblink_connect_u` 는 일반 유저도 trust 인증을 사용할 수 있습니다.
+
+- 개요
+[source, sql]
+----
+dblink_connect_u(text connstr) returns text
+dblink_connect_u(text connname, text connstr) returns text
+----
+
+- 파라미터 종류 + 
+* `connname` - 커넥션의 이름입니다. 생략할 경우 이름이 지정되지 않으며, 이름이 없는 커넥션은 1개만 만들 수 있어, 새로 생성할 경우 기존의 연결을 대체합니다. + 
+
+* `connstr` - libpq스타일의 커넥션 정보 문자열입니다. +
+** 예시 : hostaddr=127.0.0.1 port=5432 dbname=mydb user=postgres password=mypasswd options=-csearch_path= 
+- 사용 예시 + 
+[source, sql]
+----
+tmax=# SELECT dblink_connect_u('dbltest_u', 'host=210.106.105.55 user=postgres dbname=postgres port=5432');
+----
+ 
+
+
+=== *`dblink_disconnect`* 
+— 원격 데이터베이스에 대한 지속적인 연결을 닫습니다. + 
+
+- 개요
+[source, sql]
+----
+dblink_disconnect() returns text
+dblink_disconnect(text connname) returns text
+----
+
+- 파라미터 종류 + 
+* `connname` - 닫을 커넥션의 이름입니다.  + 
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=# SELECT dblink_disconnect('dbltest');
+----
+
+
+
+
+=== *`dblink`* 
+— 원격 데이터베이스에서 쿼리를 실행합니다. + 
+
+- 개요
+[source, sql]
+----
+dblink(text connname, text sql [, bool fail_on_error]) returns setof record
+dblink(text connstr, text sql [, bool fail_on_error]) returns setof record
+dblink(text sql [, bool fail_on_error]) returns setof record
+----
+
+- 파라미터 종류 + 
+* `connname` - 쿼리를 실행할 커넥션의 이름입니다. 생략할 경우 이름이 지정되지 않은 커넥션에서 실행합니다. + 
+
+* `connstr` - libpq스타일의 커넥션 정보 문자열입니다. + 
+** 예시 : hostaddr=127.0.0.1 port=5432 dbname=mydb user=postgres password=mypasswd options=-csearch_path=
+
+* `sql` - 원격 데이터베이스에서 실행할 SQL 입니다. + 
+
+* `fail_on_error` - true일 경우(기본 값), 원격 데이터베이스 서버에서 오류가 발생하면 로컬에서도 오류가 발생합니다. false인 경우 원격 데이터베이스 서버의 오류는 로컬에서 NOTICE되며, 결과 행을 반환하지 않습니다. + 
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=#  SELECT * FROM dblink('dbltest', 'SELECT id, first_name, info FROM one') 
+AS test (id integer, first_name varchar(30), info json) WHERE id < 6;
+----
+
+
+
+
+=== *`dblink_exec`* 
+— 원격 데이터베이스에서 커맨드를 실행합니다. + 
+원격 데이터베이스에서 명령(행을 반환하지 않는 모든 SQL)을 실행합니다. + 
+
+- 개요
+[source, sql]
+----
+dblink_exec(text connname, text sql [, bool fail_on_error]) returns text
+dblink_exec(text connstr, text sql [, bool fail_on_error]) returns text
+dblink_exec(text sql [, bool fail_on_error]) returns text
+----
+
+- 파라미터 종류 + 
+* `connname` - 쿼리를 실행할 커넥션의 이름입니다. 생략할 경우 이름이 지정되지 않은 커넥션에서 실행합니다. + 
+
+* `connstr` - libpq스타일의 커넥션 정보 문자열입니다. + 
+** 예시 : hostaddr=127.0.0.1 port=5432 dbname=mydb user=postgres password=mypasswd options=-csearch_path=
+
+* `sql` - 원격 데이터베이스에서 실행할 SQL 입니다. + 
+
+* `fail_on_error` - true일 경우(기본 값), 원격 데이터베이스 서버에서 오류가 발생하면 로컬에서도 오류가 발생합니다. false인 경우 원격 데이터베이스 서버의 오류는 로컬에서 NOTICE되며, 결과 행을 반환하지 않습니다. + 
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=#  SELECT * FROM dblink_exec('dbltest', 'INSERT INTO one VALUES(10,'Lee','{"name":"이현우","age":"28","Product":{"pens":1932,"notes":683}}')';
+----
+
+
+
+
+=== *`dblink_open`* 
+— 원격 데이터베이스에서 커서를 오픈합니다. + 
+
+- 개요
+[source, sql]
+----
+dblink_open(text cursorname, text sql [, bool fail_on_error]) returns text
+dblink_open(text connname, text cursorname, text sql [, bool fail_on_error]) returns text
+----
+
+- 파라미터 종류 + 
+* `connname` - 커서가 사용될 커넥션 이름입니다. + 
+
+* `cursorname` - 커서의 이름을 지정합니다. + 
+
+* `sql` - 원격 데이터베이스에서 실행할 SELECT Statement 입니다. + 
+
+* `fail_on_error` - true일 경우(기본 값), 원격 데이터베이스 서버에서 오류가 발생하면 로컬에서도 오류가 발생합니다. false인 경우 원격 데이터베이스 서버의 오류는 로컬에서 NOTICE되며, 결과 행을 반환하지 않습니다. + 
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=#  SELECT * FROM dblink_open('dbltest','curtest', 'SELECT id, first_name FROM one');
+----
+
+
+
+
+
+=== *`dblink_fetch`* 
+— 원격 데이터베이스에 열려있는 커서로부터 행을 반환합니다. + 
+
+- 개요
+[source, sql]
+----
+dblink_fetch(text cursorname, int howmany [, bool fail_on_error]) returns setof record
+dblink_fetch(text connname, text cursorname, int howmany [, bool fail_on_error]) returns setof record
+----
+
+- 파라미터 종류 + 
+* `connname` - 커서가 있는 커넥션의 이름입니다. + 
+
+* `cursorname` - Rows를 가져올 커서의 이름입니다. + 
+
+* `howmany` - 현재 커서의 위치를 기준으로 howmany 만큼의 로우를 가져옵니다. howmany 값 보다 rows가 작을 경우 추가적인 rows가 생성되지는 않습니다. + 
+
+* `fail_on_error` - true일 경우(기본 값), 원격 데이터베이스 서버에서 오류가 발생하면 로컬에서도 오류가 발생합니다. false인 경우 원격 데이터베이스 서버의 오류는 로컬에서 NOTICE되며, 결과 행을 반환하지 않습니다. + 
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=#  SELECT * FROM dblink_fetch('dbltest','curtest', 5);
+----
+
+
+
+
+
+=== *`dblink_close`* 
+— 원격 데이터베이스에 열려있는 커서를 닫습니다. + 
+
+- 개요
+[source, sql]
+----
+dblink_close(text cursorname [, bool fail_on_error]) returns text
+dblink_close(text connname, text cursorname [, bool fail_on_error]) returns text
+----
+
+- 파라미터 종류 + 
+* `connname` - 닫을 커서가 있는 커넥션의 이름입니다. + 
+
+* `cursorname` - 닫을 커서의 이름입니다. + 
+
+* `fail_on_error` - true일 경우(기본 값), 원격 데이터베이스 서버에서 오류가 발생하면 로컬에서도 오류가 발생합니다. false인 경우 원격 데이터베이스 서버의 오류는 로컬에서 NOTICE되며, 결과 행을 반환하지 않습니다. + 
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=#  SELECT * FROM dblink_close('dbltest','curtest');
+----
+
+
+
+=== *`dblink_get_connections`* 
+— 열려있는 모든 DB Link 커넥션의 이름을 반환합니다. + 
+
+- 개요
+[source, sql]
+----
+dblink_get_connections() returns text[]
+----
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=#  SELECT * FROM dblink_get_connections();
+----
+
+
+
+
+=== *`dblink_error_message`* 
+— 특정 커넥션이 마지막으로 반환한 오류메시지를 가져옵니다. + 
+오류가 없을 경우 OK 를 리턴합니다. + 
+
+- 개요
+[source, sql]
+----
+dblink_error_message(text connname) returns text
+----
+
+- 파라미터 종류 + 
+* `connname` - 오류 메시지를 가져올 커넥션의 이름입니다. + 
+
+* `fail_on_error` - true일 경우(기본 값), 원격 데이터베이스 서버에서 오류가 발생하면 로컬에서도 오류가 발생합니다. false인 경우 원격 데이터베이스 서버의 오류는 로컬에서 NOTICE되며, 결과 행을 반환하지 않습니다. + 
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=#  SELECT * FROM dblink_error_message('dbltest');
+----
+
+
+
+
+=== *`dblink_send_query`* 
+— 원격 데이터베이스에 비동기식 쿼리를 보냅니다. + 
+
+- 개요
+[source, sql]
+----
+dblink_send_query(text connname, text sql) returns int
+----
+
+- 파라미터 종류 + 
+* `connname` - 사용할 커넥션의 이름입니다. + 
+
+* `sql` - 원격 데이터베이스에서 실행할 SQL 입니다. + 
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=#  SELECT * FROM dblink_send_query('dbltest', 'SELECT * FROM one');
+----
+
+
+
+=== *`dblink_is_busy`* 
+— 커넥션이 사용중인지(busy) 비동기식 쿼리를 사용해 체크합니다. + 
+
+- 개요
+[source, sql]
+----
+dblink_is_busy(text connname) returns int
+----
+
+- 파라미터 종류 + 
+* `connname` - 사용할 커넥션의 이름입니다. + 
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=#  SELECT * FROM dblink_is_busy('dbltest');
+----
+
+
+
+
+=== *`dblink_get_notify`* 
+— 커넥션에서 비동기식 알림을 검색합니다. + 
+알림을 받으려면 dblink_exec에서 LISTEN 커맨드를 먼저 사용해야 합니다. + 
+
+- 개요
+[source, sql]
+----
+dblink_get_notify() returns setof (notify_name text, be_pid int, extra text)
+dblink_get_notify(text connname) returns setof (notify_name text, be_pid int, extra text)
+----
+
+- 파라미터 종류 + 
+* `connname` - 사용할 커넥션의 이름입니다. + 
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=# SELECT dblink_exec('LISTEN virtual');
+postgres=# SELECT * FROM dblink_get_notify();
+----
+
+
+
+=== *`dblink_get_result`* 
+— 비동기식 쿼리의 결과를 가져옵니다. + 
+dblink_send_query의 결과를 가져옵니다. + 
+쿼리가 아직 완료되지 않은 경우, 완료될 때 까지 기다립니다. + 
+ + 
+WARNING: 비동기식 쿼리의 결과가 많을 경우, 메모리 이슈가 발생할 수 있으므로, 커서를 이용하는 것을 권장합니다. + 
+
+- 개요
+[source, sql]
+----
+dblink_get_result(text connname [, bool fail_on_error]) returns setof record
+----
+
+- 파라미터 종류 + 
+* `connname` - 사용할 커넥션의 이름입니다. + 
+
+* `fail_on_error` - true일 경우(기본 값), 원격 데이터베이스 서버에서 오류가 발생하면 로컬에서도 오류가 발생합니다. false인 경우 원격 데이터베이스 서버의 오류는 로컬에서 NOTICE되며, 결과 행을 반환하지 않습니다. + 
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=# dblink_send_query('dtest1', 'select * from foo where f1 < 3') AS t1;
+ t1
+ ㅡㅡ
+  1
+
+postgres=# SELECT * FROM dblink_get_result('dtest1') AS t1(f1 int, f2 text, f3 text[]);
+ f1 | f2 |     f3
+ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+  0 | a  | {a0,b0,c0}
+  1 | b  | {a1,b1,c1}
+  2 | c  | {a2,b2,c2}
+----
+
+
+
+=== *`dblink_cancel_query`* 
+— 해당 커넥션의 활성화 되어있는 모든 쿼리를 취소합니다. + 
+
+- 개요
+[source, sql]
+----
+dblink_cancel_query(text connname) returns text
+----
+
+- 파라미터 종류 + 
+* `connname` - 사용할 커넥션의 이름입니다. + 
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=# SELECT dblink_cancel_query('dtest1');
+----
+
+
+
+=== *`dblink_get_pkey`* 
+— 릴레이션의 Primary Key 컬럼 위치와, 컬럼명을 반환합니다. + 
+
+- 개요
+[source, sql]
+----
+dblink_get_pkey(text relname) returns setof dblink_pkey_results
+----
+
+- 파라미터 종류 + 
+* `relname` - 조회할 릴레이션의 이름입니다. 대소문자가 섞여있거나, 특수문자가 들어있을 경우 ""(쌍따옴표)를 이용해야합니다. + 
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=# CREATE TABLE test (
+    t1 int,
+    t2 int,
+    t3 int,
+    PRIMARY KEY (t1, t2, t3)
+);
+
+postgres=# SELECT * FROM dblink_get_pkey('test');
+ position | colname
+ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ
+        1 | t1
+        2 | t2
+        3 | t3
+----
+
+
+
+=== *`dblink_build_sql_insert`* 
+— builds an INSERT statement using a local tuple, replacing the primary key field values with alternative supplied values + 
+
+- 개요
+[source, sql]
+----
+dblink_build_sql_insert(text relname,
+                        int2vector primary_key_attnums,
+                        integer num_primary_key_atts,
+                        text[] src_pk_att_vals_array,
+                        text[] tgt_pk_att_vals_array) returns text
+----
+
+- 파라미터 종류 + 
+* `relname` - 조회할 릴레이션의 이름입니다. 대소문자가 섞여있거나, 특수문자가 들어있을 경우 ""(쌍따옴표)를 이용해야합니다. + 
+* `primary_key_attnums` - Primary Key 컬럼의 번호입니다. + 
+* `num_primary_key_atts` - Primary Key 컬럼의 갯수입니다. + 
+* `src_pk_att_vals_array` - Local tuple을 조회하는데 사용할 Primary Key의 값 입니다. 없을시에 오류가 발생합니다. + 
+* `tgt_pk_att_vals_array` - INSERT statement를 생성할 때, 대체할 Primary Key의 값 입니다. + 
+
+- 사용 예시 + 
+[source, sql]
+----
+postgres=# SELECT dblink_build_sql_insert('foo', '1 2', 2, '{"1", "a"}', '{"1", "b''a"}'); 
+             dblink_build_sql_insert 
+ㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡㅡ 
+ INSERT INTO foo(f1,f2,f3) VALUES('1','b''a','1') 
+----
+
+=== *`dblink_build_sql_delete`* 
+— Primary Key 값에 대응하는 입력값을 이용해 DELETE문을 작성해줍니다. + 
+
+=== *`dblink_build_sql_update`* 
+— builds an UPDATE statement using a local tuple, replacing the primary key field values with alternative supplied values + 
+
+== 3. PostgreSQL에서 Foreign Data Wrapper와의 차이

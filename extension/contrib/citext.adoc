@@ -1,0 +1,42 @@
+= citext
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== citext 설명
+데이터 유형을 추가해주는 extension(citext라는 데이터 유형)입니다. text와 거의 동일하게 동작하나, 대소문자를 구별하지 않고 lower 값을 비교할 때 호출됩니다.
+연산자 사용하는 스키마는 search_path에 citext를 등록해줘야하며, 등록하지 않을경우 text가 먼저 호출됩니다.
+
+== citext 예시
+
+nick 행이 text/citext 유형인 2개의 테이블을 만들어, select로 검사하여 citext의 동작을 확인하는 간단한 예시입니다.
+[source,sql]
+----
+
+CREATE TABLE users1 (
+    nick TEXT PRIMARY KEY,
+    pass TEXT   NOT NULL
+);
+
+INSERT INTO users1 VALUES ( 'larry',  sha256(random()::text::bytea) );
+
+SELECT * FROM users1 WHERE nick = 'Larry'; 
+-- pg는 대문자 L과 소문자 l을 구분하여 Larry 데이터 검색이 되지 않음
+ nick | pass 
+------+------
+(0 rows)
+
+CREATE TABLE users2 (
+    nick CITEXT PRIMARY KEY,
+    pass TEXT   NOT NULL
+);
+
+INSERT INTO users2 VALUES ( 'larry',  sha256(random()::text::bytea) );
+
+SELECT * FROM users2 WHERE nick = 'Larry'; 
+-- citext 데이터 유형을 통해 대문자 L과 소문자 l을 구분하지 않고 검색이 되어 larry의 데이터를 볼수 있음
+ nick  |                                pass                                
+-------+--------------------------------------------------------------------
+ larry | \xb0672e2f1de116dbb93fdef8826b49157358d7e7a7aa06f8da0310c432995588
+----

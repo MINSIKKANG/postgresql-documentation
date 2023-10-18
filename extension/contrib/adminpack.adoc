@@ -1,0 +1,91 @@
+= adminpack
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== adminpack 설명
+
+adminpack은 pgadmin 및 기타 관리도구가 서버 로그 파일의 원격 관리와 같은 추가 기능을 제공하는 데 사용할 수 있는 다양한 지원 기능을 제공합니다. 슈퍼유저에게만 기능 사용이 허용되지만, grant로 다른 사용자에게 허용될 수 있습니다.
+
+== adminpack 함수
+
+* pg_catalog.pg_file_write ( filename text, data text, append boolean ) → bigint
+
+텍스트 파일에 쓰거나 추가. data 파일을 지정된 파일에 씀
+
+* pg_catalog.pg_file_sync ( filename text ) → void
+
+파일 또는 디렉토리를 디스크로 flush, 플러시 못하더라도 panic 오류 발생하지 않음
+
+* pg_catalog.pg_file_rename ( oldname text, newname text [, archivename text ] ) → boolean
+
+파일 이름 변경, 성공 true, 실패 false
+
+* pg_catalog.pg_file_unlink ( filename text ) → boolean
+
+파일 제거, 성공시 true 실패 false
+
+* pg_catalog.pg_logdir_ls () → setof record
+
+디렉토리 모든 로그파일 나열. postgresql.conf의 log_filename 매개변수 설정이 활성화 되어있어야함(postgresql-%Y-%m-%d_%H%M%S.log)
+
+== 사용 예시
+[source, sql]
+----
+extentdb=# select pg_file_write('testfile','data12345',true);
+ pg_file_write
+---------------
+             9
+(1개 행)
+----
+
+[source, bash]
+----
+-bash-4.2$ ls -alrt
+합계 80
+drwx------.  2 postgres postgres     6  6월  8 15:24 pg_twophase
+drwx------.  2 postgres postgres     6  6월  8 15:24 pg_snapshots
+drwx------.  2 postgres postgres     6  6월  8 15:24 pg_serial
+drwx------.  2 postgres postgres     6  6월  8 15:24 pg_replslot
+drwx------.  2 postgres postgres     6  6월  8 15:24 pg_notify
+drwx------.  4 postgres postgres    36  6월  8 15:24 pg_multixact
+drwx------.  2 postgres postgres     6  6월  8 15:24 pg_dynshmem
+drwx------.  2 postgres postgres     6  6월  8 15:24 pg_commit_ts
+-rw-------.  1 postgres postgres     3  6월  8 15:24 PG_VERSION
+-rw-------.  1 postgres postgres    88  6월  8 15:24 postgresql.auto.conf
+-rw-------.  1 postgres postgres  1636  6월  8 15:24 pg_ident.conf
+drwx------.  2 postgres postgres    18  6월 16 13:40 pg_xact
+drwx------.  4 postgres postgres    51  6월 16 20:33 ..
+drwx------.  2 postgres postgres    45  7월 25 03:08 pg_tblspc
+-rw-------.  1 postgres postgres  4590  7월 26 01:49 pg_hba.conf
+drwx------.  2 postgres postgres   188  8월  4 14:54 log
+-rw-------.  1 postgres postgres 28893  8월 10 17:39 postgresql.conf
+-rw-------.  1 postgres postgres    58  8월 11 15:20 postmaster.opts
+-rw-------.  1 postgres postgres    96  8월 11 15:20 postmaster.pid
+drwx------.  2 postgres postgres    37  8월 11 15:20 pg_stat
+-rw-------.  1 postgres postgres    30  8월 12 00:00 current_logfiles
+drwx------.  2 postgres postgres    18  8월 12 02:56 pg_subtrans
+drwx------.  8 postgres postgres    84  8월 12 16:58 base
+drwx------.  2 postgres postgres  4096  8월 12 16:58 global
+drwx------.  3 postgres postgres   188  8월 12 17:38 pg_wal
+-rw-------.  1 postgres postgres     9  8월 12 17:52 testfile
+drwx------. 20 postgres postgres  4096  8월 12 17:52 .
+drwx------.  4 postgres postgres    68  8월 12 17:53 pg_logical
+drwx------.  2 postgres postgres   155  8월 12 17:54 pg_stat_tmp
+-bash-4.2$ pwd
+/var/lib/pgsql/14/data
+-bash-4.2$ cat testfile
+data12345
+
+----
+
+[source, sql]
+----
+extentdb=# select pg_logdir_ls();
+                         pg_logdir_ls
+--------------------------------------------------------------
+ ("2022-08-12 17:57:04",log/postgresql-2022-08-12_175704.log)
+(1개 행)
+
+----

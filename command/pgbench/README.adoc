@@ -1,0 +1,224 @@
+= pgbench
+:toc: 
+:toc-title: 목차
+:sectlinks:
+
+== 1. pgbench 란?
+- 공식 문서 참고 : https://www.postgresql.org/docs/current/pgbench.html
+
+pgbench는 PostgreSQL에서 벤치마크 테스트를 실행하기 위한 프로그램입니다. Multi-Database 세션에서 동일한 SQL 명령 시퀀스를 사용하여 실행한 후, 평균 트랜잭션 속도(초당 트랜잭션)을 계산합니다. TPC-B 시나리오에 기반하여 테스트하며, SELECT, UPDATE, INSERT 쿼리를 사용합니다. 
+
+== 2. pgbench 공통 옵션
+- `-h hostname` or `--host=hostname` +
+PostgreSQL 데이터베이스의 hostname을 지정합니다.
+- `-p port번호` or `--port=port번호` +
+PostgreSQL 데이터베이스의 Port 번호를 지정합니다. 기본값은 5432입니다.
+- `-U Postgres유저이름` or `--username=Postgre유저이름` +
+pgbench로 접속할 PostgreSQL의 유저 이름을 지정합니다. 기본값은 postgres입니다.
+- `-V` or `--version` +
+pgbench 버전을 보여줍니다.
+- `-?` or `--help` +
+pgbench 명령에 대한 정보를 출력합니다.
+
+== 3. pgbench 수행
+
+=== 3-1. pgbench Initialization 
+
+pgbench가 실행되기 위해서는 pgbench를 위한 테이블이 생성되어야 합니다. `-i` 옵션을 사용하여 초기화 작업이 필요합니다.
+
+==== 초기화 옵션
+- `-i` or `--initialize` +
+초기화할 때 사용하는 옵션입니다. 초기화 옵션은 이 옵션을 반드시 써야 사용이 가능합니다.
+
+- `-I init_steps` or `--init-steps=init_steps` +
+초기화 단계에서 수행이 가능하며 init_steps 를 여러개 지정할 수 있으며 지정된 순서대로 동작합니다. init-stpes의 Default 값은 'dtgvp'입니다. +
+    * d (drop) +
+    기존 pgbench 테이블을 drop 합니다.
+    * t (table create) +
+    pgbench 시나리오에서 사용되는 테이블(pgbench_accounts, pgbench_branches, pgbench_history, pgbench_tellers)을 생성합니다.
+    * g or G (generate data, Client side or Server side) +
+    데이터를 생성하고 존재하는 모든 데이터를 교체합니다. +
+    g (Client side)는 pgbench client에서 data를 생성한 후에 서버에게 데이터를 전달합니다. log는 100,000 row마다 출력됩니다. +
+    G (Server side)는 pgbench client에서 작은 쿼리들을 생성하여 server에 보내 server가 직접 데이터를 생성하도록 합니다. server와 client의 대역폭을 많이 필요로 하지 않지만 server측에서 더 많은 작업을 하게 됩니다. 서버에서 데이터를 생성할 때는 log가 출력되지 않습니다. +
+    Default값은 g(Client side)입니다.
+    * v (vacuum) +
+    표준 테이블에 vacuum을 실행합니다.
+    * p (기본키 생성) +
+    표준 테이블에 기본키를 생성합니다.
+    * f (외래키 생성) +
+    표준 테이블간에 외래키 제약조건을 생성합니다.
+
+- `-n` or `--no-vacuum` +
+vacuum을 실행하지 않습니다. `--init-steps`옵션에 vacuum을 실행하는 단계도 무시됩니다.
+
+- `-s scale_factor` or `--scale=scale_factor` +
+입력된 scale_factor의 100,000배의 행을 pgbench_accounts에 생성합니다.
+- 
+
+==== 초기화 실행
+해당 예시는 1,000,000 row를 생성하는 초기화 단계 입니다.
+[source,shell]
+----
+pgbench -i -s 10 postgres
+----
+
+해당 명령어를 실행하면 다음과 같이 table이 생성됩니다.
+[width="100%", options="header"]
+|====================
+|테이블 이름 |설명
+|pgbench_accounts | 초기화할 때 scale factor만큼 생성되는 데이터를 저장하는 테이블, 계좌 테이블
+|pgbench_branches | 지점 테이블 
+|pgbench_history  | 이전에 수행한 benchmarking의 history를 저장하는 테이블 +
+내장 스크립트에서 Insert문이 실행되지 않으면 빈 테이블이 됨
+|pgbench_tellers  | 은행원 테이블, branch(지점)과 teller(은행원)은 1:M 관계이다.
+|====================
+
+[source, shell]
+----
+postgres=# \dt+
+                          List of relations
+ Schema |       Name       | Type  |  Owner   |  Size   | Description 
+--------+------------------+-------+----------+---------+-------------
+ public | pgbench_accounts | table | postgres | 128 MB  | 
+ public | pgbench_branches | table | postgres | 40 kB   | 
+ public | pgbench_history  | table | postgres | 0 bytes | 
+ public | pgbench_tellers  | table | postgres | 40 kB   | 
+(4 rows)
+----
+
+
+=== 3-2. pgbench Benchmarking
+
+==== Benchmarking 옵션
+
+- `-b scriptname[@weight]` or `--builtin=scriptname[@weight]`
+스크립트를 실행할 방식을 선택합니다. `pgbench -b list` 를 입력하면 사용할 수 있는 내장 스크립트 실행 방식 리스트를 볼 수 있습니다. 기본적으로는 tpcb-like와 simple-update, select-only 방식이 있습니다. 여러 방식에 대하여 가중치를 사용하여 테스트 할때에는  `-b` 옵션을 여러 번 사용합니다. +
+* tpcb-like : 기본적인 값으로 내장 스크립트 전체에 대하여 수행합니다.
+* simple-update : 내장 스크립트 중 Update 테스트를 제외합니다.
+* select-only : 내장 스크립트 중 Select 만 테스트합니다.
+
+----
+$ pgbench -b select-only@1 -b simple-update@2
+----
+
+- `-c client 수` or `--client=client 수` +
+입력된 시뮬레이션 클라이언트 수만큼 세션을 만들어 동시에 데이터베이스에 benchmarking합니다.
+
+- `-f 파일이름[@weight]` or `--file=파일이름[@weight]` +
+실행할 테스트 스크립트 중에 지정하는 file을 추가합니다. 지정한 파일에 대한 가중치를 선택할 수 있습니다. weight의 기본값은 1입니다.
+
+- `-j 스레드 수` or `--jobs=스레드 수` +
+몇 개의 스레드로 동작할지에 대해 정의합니다. 클라이언트가 1이상이면 스레드마다 균등하게 분산됩니다. 기본값은 1입니다.
+
+- `-t 트랜잭션 수` or `--transactions=트랜잭션 수` +
+설정된 각 클라이언트마다 몇번의 트랜잭션을 발생시킬 지에 대해 정의합니다. Client가 10이고 트랜잭션이 10이라면 총 100번의 트랜잭션을 수행합니다. 기본값은 10입니다. +
+`-t`(트랜잭션 수)와 `-T`(시간)은 동시에 사용할 수 없습니다.
+
+- `-T seconds` or `--time=seconds` +
+ 몇 초동안 테스트를 진행할지에 대해 정의합니다. +
+ `-t`(트랜잭션 수)와 `-T`(시간)은 동시에 사용할 수 없습니다.
+
+ - `-n` or `--no-vacuum` +
+ benchmarking을 수행하기 전에 vacuum이 실행되지 않고 수행됩니다. 
+
+==== Benchmarking 실행
+[source, shell]
+----
+$ pgbench -h localhost -p 5432 -U postgres -c 4 -j 4 -t 10
+starting vacuum...end.
+transaction type: <builtin: TPC-B (sort of)>
+scaling factor: 10
+query mode: simple
+number of clients: 4
+number of threads: 4
+number of transactions per client: 10
+number of transactions actually processed: 40/40
+latency average = 2.426 ms
+tps = 1648.796257 (including connections establishing)
+tps = 1889.282362 (excluding connections establishing)
+----
+
+=== 3-3. pgbench 동작
+1. 초기화 과정, benchmarking 과정 모두 실행 전에 vacuum을 수행합니다. `--no-vaccum` 으로 실행되지 않으며 vacuum이 실행된 후에 initialize/benchmarking을 실행합니다. 
+2. 실행이 시작되면 pgbench는 7개의 내장 테스트 스크립트를 랜덤하게 실행합니다. 사용자에 의해 지정된 파일 및 스크립트가 있을 경우에는 지정된 가중치만큼 포함하여 실행합니다. 기본적으로 실행되는 스크립트는 다음 7개입니다. +
+====
+- BEGIN;
+- UPDATE pgbench_accounts SET abalance = abalance + :delta WHERE aid = :aid;
+- SELECT abalance FROM pgbench_accounts WHERE aid = :aid;
+- UPDATE pgbench_tellers SET tbalance = tbalance + :delta WHERE tid = :tid;
+- UPDATE pgbench_branches SET bbalance = bbalance + :delta WHERE bid = :bid;
+- INSERT INTO pgbench_history (tid, bid, aid, delta, mtime) VALUES (:tid, :bid, :aid, :delta, CURRENT_TIMESTAMP);
+- END;
+====
+
+=== 3-4. 로깅
+==== 로그 옵션
+- `-l` or `--log` +
+트랜잭션에 대한 로그 파일을 기록합니다. 기본적으로 로그 파일은 'pgbench_log.PID'로 생성됩니다. `--log-prefix=prefix` 옵션을 사용하여 log 파일의 이름을 지정하면 'prefix.PID'로 로그파일이 생성됩니다. 그리고 `-j` 옵션을 이용하여 다중 세션 및 스레드로 benchmarking 시에는 추가로 'log.PID', 'log.PID.1', 'log.PID.2'와 같이 뒤에 일련번호가 붙은 이름으로 로그 파일이 생성됩니다.
+
+==== 로그 출력
+
+로그 형식은 다음 순서로 로그 파일에 기록됩니다.
+----
+client_id transaction_no time script_no time_epoch time_us [ schedule_lag ]
+----
+- client_id : 클라이언트 세션을 나타냅니다.
+- transaction_no : 해당 세션에서 실행된 트랜잭션 수를 나타냅니다.
+- time : 트랜잭션 시간(ms)입니다.
+- script_no : 사용된 스크립트 파일을 식별하기 위한 number이며, 여러 스크립트 파일을 이용하여 benchmarking할 때 유용합니다.
+- time_epoch, time_us : Unix-epoch time stamp과 offset을  마이크로초(ms)로 표시됩니다.
+- schedule_lag : 트랜잭션 예약 시작 시간과 실제 시작 시간의 간격차이를 마이크로초(ms)로 표시합니다. 해당 시간은 `--rate` 옵션을 사용했을때 보여집니다.
+
+== 4. Custom Scripts
+`-f` 옵션으로 지정된 스크립트 파일을 사용하여 benchmarking이 가능합니다. 이 때 지정한 파일을 트랜잭션 1회로 계산되어 측정됩니다. +
+스크립트 파일은 빈줄, --(주석)으로 시작되는 줄은 무시되며 자체적인 "meta command"도 포함하여 실행합니다.
+
+- `-D varname=value` or `--define=varname=value` +
+사용자 스크립트의 변수를 지정하여 benchmarking할 수 있습니다. 
+
+- 자동으로 선언되는 변수
+|====================
+|변수 |설명
+|client_id | 클라이언트 세션을 식별하는 고유 번호(0부터 시작)
+|default_seed | 기본적으로 해시 함수에 사용되는 seed
+|random_seed | 임의 값 seed(`-D` 옵션으로 random_seed를 정의하지 않았을 때만)
+|scale | 현재 스케일 팩터
+|====================
+
+=== 4.1 meta command
+meta command는 백슬래시(\)로 시작합니다. meta command에 대한 인수는 공백으로 구분됩니다.
+
+==== 조건문
+- 표현식 +
+\if expression +
+\elif expression +
+\else +
+\endif
+
+==== 변수 설정
+- 표현식 +
+\set varname expression
+- NULL 입력 시 함수와 연산자는 NULL이 반환합니다.
+- 조건문에서 0이 아니면 TRUE, 0이면 FALSE를 반환합니다.
+- 조건문에 ELSE가 없으면 default값으로 NULL이 반환됩니다.
+- 예시 +
+
+----
+\set ntellers 10 * :scale
+\set aid (1021 * random(1,10000 * :scale)) % \
+        (10000 * :scale) +1
+\set divx CASE WHEN :x <> 0 TEHN :y/:x ELSE NULL END
+----
+
+==== sleep
+- 표현식 +
+\sleep number[ us | ms | s ]
+- us(마이크로초), ms(밀리초), s(초)단위로 지정할 수 있으며 default는 s(초)단위입니다.
+- number 대신 변수로 대체 가능합니다.
+
+==== shell 변수 설정
+- 표현식
+\setshell varnmae command [ argument ... ] +
+\shell command [ argument ... ]
+- 변수를 쉘 커맨드인 `command` 명령의 결과로 설정합니다.
+- \sethell과 같은 명령이지만 명령의 결과가 없습니다.

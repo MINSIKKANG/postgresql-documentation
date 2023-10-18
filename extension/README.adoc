@@ -1,0 +1,178 @@
+이 문서는 HyperSQL의 PostgreSQL extension에 대하여 서술합니다. +
+해당 문서는 PostgreSQL 14.3 최신 릴리즈 기준으로 작성되었습니다.
+
+**Extension**
+postgresql.conf에 정의되는 shared_preload_libraries(string) 파라미터에 등록되어 PostgreSQL 서버에서 사용할 수 있습니다. 이 라이브러리는 Load 명령어로 서버의 주소공간으로 로드합니다. 명시적으로 함수의 집합을 정의하는 대신 "hooks"라는 동작을 통해 필요한 라이브러리들을 사용하여 함수를 제공하게 됩니다.
+
+- extension library load 원리 +
+shared_preload_libraries 정의 -> Load 명령어로 로드 -> Load는 dynamic_library_path의 경로 -> dynamic_library_path default=$libdir -> $libdir = pg_config --pkglibdir (이건 표준으로 제공되는 PostgreSQL 설치되는 모듈 경로)
+
+- 추가 가능한 extension 확인
+[source, sql]
+select * from pg_catalog.pg_available_extensions;
+
+
+== Hook
+- 출처1 : https://arctype.com/blog/postgresql-hooks/
+- 출처2 : https://www.percona.com/blog/2019/04/05/writing-postgresql-extensions-is-fun-c-language/
+
+PostgreSQL에서 Hook는 이벤트 기반 함수(event-based function)입니다. event/trigger기반으로 Hook을 만들 수 있으며, 데이터베이스에서 호출합니다. Hook들은 많은 라이브러리와 프로젝트에서 사용되며, 모두 같은 base structure(기반 구조)를 공유합니다.
+
+=== Hook의 구조
+Hook은 다음과 같은 구조를 가집니다.
+[source,c]
+-----
+include "postgres.h"
+
+// Hook의 코드 부분
+static void custom_hook()
+
+// Hook을 불러오는 부분, Extension을 시작할 때 호출
+void _PG_init(void);
+
+// Extension이 끝날 때 Hook을 반환하는 부분
+void _PG_fini(void);
+-----
+
+
+=== Initialize
+Hook는 Postgres의 `contrib` 소스코드 경로에 배치해야 합니다. Postgres와 함께 이미 제공된 Extension에 대한 경로는 link:https://github.com/postgres/postgres/tree/master/contrib[여기서] 확인할 수 있습니다.
+
+Hook의 코드가 준비되면 소스에서 빌드하거나 첨부파일을 붙여넣어 사용할 수 있습니다.
+
+=== Hook의 종류
+C 프로그래밍 언어에서 호출할 수 있는 후크는 6종류(총 30개)가 있습니다.
+
+link:https://github.com/taminomara/psql-hooks#general-hooks[postgresql hook git]
+
+- General Hooks : 일반 PostgreSQL 기능과 함께 동작하는 Hooks
+- Security Hooks : 암호 및 user의 생성과 같은 특정 보안기능이 있는 Hooks
+- Function Manager Hooks : 함수의 실행중에 동작하는 Hooks
+- Planner Hooks : Planner 단계에서 끼어듭니다. 예로 Timescale은 쿼리 실행 plan을 변경하기 위해 `planner_hook` 을 사용합니다.
+- Executor Hooks : Execution 단계에서 끼어듭니다. 예로 pg_stat_statements는 실행 쿼리를 파악 및 Supabase?를 위해 `ExcutorRun_hook` 를 사용하며, role based 보안을 실행하기 위해 `ProcessUtility_hook` 을 사용합니다.
+- PL/pgsql Hooks : PL/pgsql 함수로 작업할 때 편한 Hook들입니다.
+
+=== pg_stat_statments의 Hook 예
+설명의 이해를 돕기 위해 일단 Hook을 가져오는 부분부터 보자.
+
+[source, c]
+-----
+void
+_PG_init(void)
+{
+    .....
+    prev_ExecutorStart = ExecutorStart_hook;
+    ExecutorStart_hook = pgss_ExecutorStart;
+    .....
+}
+-----
+구조에서 이야기했듯이 _PG_init()은 Extension이 load 되었을 때 실행됩니다. `ExecutorStart_hook` 은 이미 있는 hook이고 그것을 prev_ExecutorStart에 정의를 저장합니다. 그리고 실제로 ExecutorStart_hook은 사용자가 정의하는 (여기서는 pg_stat_statements Extension이 정의하는) 함수로 대체됩니다. 
+
+여기서 이해를 조금 더 돕기 위해 `ExecutorStart_hook`을 좀 더 살펴봅니다. `ExecutorStart_hook` 은 Executor Hooks의 한 종류이며 쿼리 실행 계획이 시작될 때 호출이 됩니다. 
+
+[source,c]
+void ExecutorStart_hook (queryDesc, eflags) <>
+
+형태는 다음과 같으며 queryDesc는 QueryDesc*라는 구조를 가지며 CreateQueryDesc에 의해 생성되며 tupDesc 필드는 반환될 튜플의 설명으로 채워집니다. 그리고 internal 필드(estate와 planstate)도 설정됩니다.
+그리고 eflags는 executor.h 에서 정의하는 flag bit를 의미합니다.
+
+link:https://doxygen.postgresql.org/pquery_8c_source.html#l00067[CreateQueryDesc]를 살짝 살펴보자.
+
+[source,c]
+-----
+ QueryDesc *
+ CreateQueryDesc(PlannedStmt *plannedstmt,
+                 const char *sourceText,
+                 Snapshot snapshot,
+                 Snapshot crosscheck_snapshot,
+                 DestReceiver *dest,
+                 ParamListInfo params,
+                 QueryEnvironment *queryEnv,
+                 int instrument_options)
+ {
+     .....
+     qd->tupDesc = NULL;
+     qd->estate = NULL;
+     qd->planstate = NULL;
+     qd->totaltime = NULL;
+     .....
+     return qd;
+ }
+-----
+CreateQueryDesc 함수는 위에서 언급한 tupDesc, estate, planstate 말고도 totaltime에 대한 값도 NULL 값입니다.
+
+[source,c]
+-----
+/*
+ * ExecutorStart hook: start up tracking if needed
+ */
+static void
+pgss_ExecutorStart(QueryDesc *queryDesc, int eflags)
+{
+	if (prev_ExecutorStart)
+		prev_ExecutorStart(queryDesc, eflags);
+	else
+		standard_ExecutorStart(queryDesc, eflags);
+
+	/*
+	 * If query has queryId zero, don't track it.  This prevents double
+	 * counting of optimizable statements that are directly contained in
+	 * utility statements.
+	 */
+	if (pgss_enabled(exec_nested_level) && queryDesc->plannedstmt->queryId != UINT64CONST(0))
+	{
+		/*
+		 * Set up to track total elapsed time in ExecutorRun.  Make sure the
+		 * space is allocated in the per-query context so it will go away at
+		 * ExecutorEnd.
+		 */
+		if (queryDesc->totaltime == NULL)
+		{
+			MemoryContext oldcxt;
+
+			oldcxt = MemoryContextSwitchTo(queryDesc->estate->es_query_cxt);
+			queryDesc->totaltime = InstrAlloc(1, INSTRUMENT_ALL, false);
+			MemoryContextSwitchTo(oldcxt);
+		}
+	}
+}
+-----
+
+이제 ExecutorStart를 Hook을 통해 가져왔으니 해당 Logic을 살펴보자. 해당 쿼리 실행 계획의 queryid가 0이 아니고 pgss_enable의 값이 맞다면 해당 totaltime을 변경하는 것이다.
+
+[source,c]
+-----
+#define pgss_enabled(level) \
+	(!IsParallelWorker() && \
+	(pgss_track == PGSS_TRACK_ALL || \
+	(pgss_track == PGSS_TRACK_TOP && (level) == 0)))
+-----
+pgss_enable은 [parallelworker가 아니면서], top level query문이거나, nested join이 한번 일어나며 nested_level이 0인 경우이다.
+
+이제 위에서 언급했던 queryDesc->totaltime 가 NULL로 생성되는 것을 알았습니다. 그럼 Instrument는 런타임 통계 수집을 위한 정보를 다음 구조체이다. 
+
+[source,c]
+-----
+ typedef struct Instrumentation
+ {  ....
+     double      startup;        /* total startup time (in seconds) */
+     double      total;          /* total time (in seconds) */
+     double      ntuples;        /* total tuples produced */
+    ....
+ } Instrumentation;
+-----
+
+total 시간에 대한 정보를 기록에 대하여 구조체를 만들 수 있도록하는 것입니다. InstAlloc()에 대한 설명은 link:https://doxygen.postgresql.org/instrument_8h.html#a59ea15cb282fa7bbb2c102b729141d5d[해당 링크] 를 참조합니다.
+
+=== General Hooks
+- void emit_log_hook(edata) <> +
+  Server의 Log가 보내지기 전에 message를 가로챌 수 있는 Hook
+- void shmem_startup_hook() <> +
+  Extension이 Shared Memory를 초기화하기 위한 Hook
+
+=== Security Hooks
+- void check_password_hook(username, shadow_pass, password_type, validuntil_time, validuntil_null) <> +
+암호 제약 조건을 적용하고 암호 변경에 대한 작업을 수행하기 위한 후크입니다.
+
+- void ClientAuthentication_hook(port, status) <> +
+인증 프로세스를 제어하기 위한 후크입니다. 사용자 인증이 완료된 후 호출됩니다(인증 성공 여부에 관계없이).

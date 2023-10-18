@@ -1,0 +1,157 @@
+= orafce extention
+:toc:
+:toc-title:
+
+== orafce
+
+=== 참고 자료 : https://github.com/orafce/orafce
+
+----
+orafce 는 추가 함수 및 연산자로 PostgreSQL 을 향상하도록 설계된 Extension 입니다.
+
+Oracle Database 와 호환되는 기능이 제공됩니다. 이 Extension 을 사용하면 PostgreSQL 내에서 잘 알려진 Oracle의 기능과 패키지를 사용할 수 있습니다.
+
+이러한 기능을 사용하면 PostgreSQL 로 쉽게 마이그레이션하고 애플리케이션 재구성 비용을 줄일 수 있습니다.
+----
+
+== orafce Install
+
+=== 사전 패키지 설치
+----
+sudo yum -y install flex bison readline-devel zlib-devel openssl-devel wget libicu-devel install llvm5.0-devel llvm-toolset-7-clang gcc-c++
+----
+
+=== yum install
+----
+yum -y install orafce_14.x86_64
+----
+
+=== source install
+----
+git clone https://github.com/orafce/orafce.git
+
+cd orafce 
+
+make
+make install
+----
+
+=== Extension Create
+* 설치 완료 후 PostgreSQL 내부 접속 후 Extension 생성 및 조회
+----
+postgres=# CREATE EXTENSION orafce;
+CREATE EXTENSION
+
+postgres=# select * from pg_available_extensions where name='orafce';
+  name  | default_version | installed_version |                                            comment                                            
+--------+-----------------+-------------------+-----------------------------------------------------------------------------------------------
+ orafce | 3.21            | 3.21              | Functions and operators that emulate a subset of functions and packages from the Oracle RDBMS
+(1 row)
+----
+
+== Oracle 기능 및 Oracle 패키지
+
+Orafce Extension 에는 Oracle 애플리케이션을 PostgreSQL로 이식하는 데 도움이 되거나 일반적으로 유용할 수 있는 몇 가지 유용한 기능이 포함되어 있습니다.
+
+아래는 PostgreSQL v14.3 에서 참고 자료에 정리된 내용을 테스트한 내용입니다.
+
+
+* trunc, round function 의 문자열
+----
+Y,YY,YYY,YYYY,SYYY,SYEAR	year
+I,IY,IYY,IYYY			iso year
+Q,				quarter
+WW				week, day as first day of year
+IW				week, beginning Monday
+W				week, day as first day of month
+DAY,DY,D			first day of week, sunday
+MONTH,MON,MM,RM			month
+CC,SCC				century
+DDD,DD,J			day
+HH,HH12,HH24			hour
+MI				minute
+----
+
+=== Date Functions
+
+* add_months(date,integer) date - date에 integer 개월을 더한 값을 반환합니다.
+----
+postgres=# select add_months(date '2005-05-31',1);
+ add_months 
+------------
+ 2005-06-30
+(1 row)
+----
+
+* last_date(date) date - date 값을 기준으로 월의 마지막 날을 반환합니다.
+----
+postgres=# select last_day(date '2005-05-24');
+  last_day  
+------------
+ 2005-05-31
+(1 row)
+
+----
+
+* next_day(date, text) date - date 값보다 큰 첫번째 요일을 반환합니다.
+----
+postgres=# select next_day(date '2005-05-24', 'monday');
+  next_day  
+------------
+ 2005-05-30
+(1 row)
+----
+
+* next_day(date, integer) date - 위의 함수와 동일합니다. 두번째 파라미터가 1 ~ 7 이 설정됩니다. 이는 일요일 ~ 토요일을 의미합니다.
+----
+postgres=# select next_day(date '2005-05-24', 1);
+  next_day  
+------------
+ 2005-05-29
+(1 row)
+----
+
+* months_between(date, date) numeric - date1과 date2 사이의 개월 수를 반환합니다. 소수 월이 계산되는 경우 months_between 함수는 31일 월을 기준으로 소수를 계산합니다.
+----
+postgres=# select months_between(date '1995-02-02', date '1995-01-01');
+  months_between  
+------------------
+ 1.03225806451613
+(1 row)
+----
+
+* trunc(date, text) date - 지정된 형식에 따라 date 를 자릅니다.
+----
+postgres=# select trunc(date '2005-07-12', 'iw');
+   trunc    
+------------
+ 2005-07-11
+(1 row)
+----
+
+* round(date, text) date - 지정된 형식에 따라 date 를 반올림합니다.
+----
+postgres=# select round(date '2005-07-12', 'yyyy');
+   round    
+------------
+ 2006-01-01
+(1 row)
+----
+
+* to_date(text) timestamp - 입력 텍스트를 타임스탬프에 입력합니다. GUC orafce.nls_date_format은 이 함수에 대한 입력 텍스트 형식을 지정하는 데 사용됩니다. 값이 비어 있거나 DEFAULT로 설정된 경우 PostgreSQL의 datestyle GUC 설정에 따라 텍스트 형식을 입력합니다.
+----
+orafce.nls_date_format value to DEFAULT
+----
+----
+postgres=# select to_date('2014-05-19 17:23:53+5:30');
+       to_date       
+---------------------
+ 2014-05-19 17:23:53
+(1 row)
+----
+----
+orafce.nls_date_format='YYYY-MMDD HH24:MI:SS'
+----
+----
+추후 추가 예정
+----

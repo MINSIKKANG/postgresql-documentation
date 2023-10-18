@@ -1,0 +1,100 @@
+= lo
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== lo 설명
+lo 모듈은 대형 개체(BLOB) 관리를 지원합니다. 데이터 유형 lo와 lo_manage라는 트리거를 지원합니다. 기존에도 oid를 이용하여 blob형 데이터를 oid로 지정해서 다룰 수도 있지만, lo 모듈을 이용해 blob형 데이터를 lo로 지정하여 lo_manage 트리거를 통해 oid를 쿼리에서 다루지 않게 됩니다. 따라서 일반 데이터의 oid와 헷갈리지 않게되어 관리측면에서 유리해진다고 소개됩니다.
+
+== lo 예시
+
+blob을 다룰 테이블을 생성하고, 간단한 예시 이미지를 다루는 과정의 예시입니다. 
+
+이미지 파일 경로
+[source,bash]
+----
+[hypersql@localhost:image]$ pwd
+/hypersql/image
+[hypersql@localhost:image]$ ls -arlt
+total 100
+-rw-r--r--.  1 hypersql hypersql 48248 Aug 24 00:51 pgele.png
+drwx------. 16 hypersql hypersql  4096 Aug 24 00:51 ..
+-rw-r--r--.  1 hypersql hypersql 48248 Aug 24 01:25 pgele2.png
+drwxrwxr-x.  2 hypersql hypersql    41 Aug 24 01:25 .
+----
+
+일반적으로 oid 사용시
+[source,sql]
+----
+CREATE TABLE image (
+    name            text,
+    raster          oid
+);
+
+INSERT INTO image (name, raster) VALUES ('beautiful image', lo_import('/etc/motd', 68583)); 
+-- 임의로 oid를 지정해서 넣게 되는데, 기존에 있던 일반 데이터의 oid일 수 있어서 다시 지정해줘야함. 
+-- 일반 데이터의 oid와 헷갈리면 안되므로 insert/update/delete 실행할 때 마다 oid를 신경써야함. 
+----
+
+lo 모듈 사용시
+[source,sql]
+----
+CREATE TABLE a (fname name,image lo);
+
+INSERT INTO a VALUES ('empty');
+
+INSERT INTO a VALUES ('pgele.png', lo_import('/hypersql/image/pgele.png')::lo); -- lo타입을 써서 테이블에 insert
+
+SELECT *,image::oid from a; -- oid로 자동 배정 확인
+SELECT oid FROM pg_largeobject_metadata;  -- largeobjet로 배정되는 내용 확인. oid가 생성되지만 oid로 데이터를 다루지는 않음
+  oid  
+-------
+ 32740 -- oid 는 다를 수 있음
+(1 row)
+
+CREATE TRIGGER t_a
+BEFORE UPDATE OR DELETE ON a
+FOR EACH ROW
+EXECUTE PROCEDURE lo_manage(image);
+
+INSERT INTO a VALUES ('pgele2.png', lo_import('/hypersql/image/pgele2.png')); 
+-- 구문에 lo를 쓰지않고도 트리거를 통해 저절로 lo 및 oid 배정됨
+
+SELECT * FROM a; -- 내용 확인
+SELECT oid FROM pg_largeobject_metadata;
+  oid  
+-------
+ 32740
+ 32775
+(2 rows)
+
+delete from a where fname ='pgele2.png';
+
+SELECT * FROM a; --pgele2.png 삭제 후 내용 확인
+SELECT oid FROM pg_largeobject_metadata; --삭제시에도 트리거가 자동으로 largeobject oid까지 삭제해줌
+  oid  
+-------
+ 32740
+(1 row)
+
+select lo_export(a.image, '/hypersql/image/pgele_copy.png') from a where fname='pgele.png';
+-- 기존 방식처럼 lo_export 사용 가능. 저장된 pgele.png 이미지를 pgele_copy.png라는 다른 이름의 이미지로 export
+ lo_export 
+-----------
+         1
+(1 row)
+----
+
+이미지 파일 export 확인
+[source,bash]
+----
+postgres=# \q
+[hypersql@localhost:image]$ ls -arlt
+total 148
+-rw-r--r--.  1 hypersql hypersql 48248 Aug 24 00:51 pgele.png
+drwx------. 16 hypersql hypersql  4096 Aug 24 00:51 ..
+-rw-r--r--.  1 hypersql hypersql 48248 Aug 24 01:25 pgele2.png
+drwxrwxr-x.  2 hypersql hypersql    63 Aug 24 01:32 .
+-rw-r--r--.  1 hypersql hypersql 48248 Aug 24 01:32 pgele_copy.png
+----

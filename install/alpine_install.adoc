@@ -1,0 +1,177 @@
+= Alpine PostgreSQL Install
+:toc:
+:toc-title:
+:sectlinks:
+:sectnums:
+
+2022-07-08 기준 alpine-3.16 버전으로 테스트 되었습니다. +
+- OS 이미지 : https://www.alpinelinux.org/downloads/
+- Docker 이미지 : https://hub.docker.com/_/alpine (docker.io/alpine:3.16)
+
+== PostgreSQL 설치 및 설정
+
+=== PostgreSQL apk package 설치
+
+apk는 alpine의 패키지 관리자입니다. 기본 저장소는 `/etc/apk/repositories` 에서 확인할 수 있습니다.
+
+- https://dl-cdn.alpinelinux.org/alpine/v3.16/main
+- https://dl-cdn.alpinelinux.org/alpine/v3.16/community
+
+==== PostgreSQL 14 설치
+[source,bash]
+-----
+apk add postgresql14
+apk add postgresql14-contrib
+-----
+
+==== 추가 패키지 설치
+[source,bash]
+-----
+apk add krb5-libs libxslt llvm13-libs lz4-libs zstd zstd-libs bash su-exec icu-data-en
+-----
+
+
+==== 추가로 설치되는 패키지 목록
+
+|======================
+|패키지 | 설명
+|postgresql-common libpq ncurses-terminfo-base ncurses-libs readline postgresql14-client tzdata icu-data-en libgcc libstdc++ icu-libs gdbm libsasl libldap xz-libs libxml2 postgresql14 | postgresql14 설치 시 다운되는 라이브러리
+|libuuid postgresql14-contrib | postgresql14-contrib 설치 시 다운되는 패키지
+|krb5-libs krb5-conf libcom_err keyutils-libs libverto | kerberos 통신
+|libxslt libgpg-error libcrypt | XSLT 스타일시트로 XML 문서를 여러 양식으로 변환
+|llvm3-libs libffi | PostgreSQL이 빌드될 때 JIT 컴파일을 사용할 때 필요한 패키지
+|lz4-libs | 데이터 압축알고리즘
+|zstd zstd-libs | 데이터 압축알고리즘
+|bash | bash 환경 설치
+|su-exec | 특정 권한으로 Command를 실행할 수 있는 패키지, su나 sudo처럼 child로 실행되지 않고 직접 명령어를 실행할 수 있습니다. (https://github.com/ncopa/su-exec)
+|======================
+
+=== Locale 설정
+Locale은 환경에 따라 바꿀 수 있지만 PostgreSQL 에서의 기본 설정은 `LC_COLLATE=C` 로 설정합니다. 
+
+-----
+export CHARSET=UTF-8
+export LANG=C.UTF-8
+export LC_COLLATE=C
+-----
+
+
+=== user 및 디렉토리 생성 +
+socket 디렉토리 권한 변경도 같이 합니다.
+
+[%header, cols="4,6"]
+|======================
+|경로 | 설명
+|/hypersql/pg/14/data | PostgreSQL Database Cluster 경로
+|/hypersql/pg/14/log/pg_log | PostgreSQL 관련 log 중에 PostgreSQL의 log 경로
+|/hypersql/pg/14/pg_wal | PostgreSQL의 wal파일이 저장되는 경로
+|/hypersql/pg/14/archive | PostgreSQL의 archive파일이 저장되는 경로
+|/var/run/hypersql | PostgreSQL 통신을 위한 socket이 저장되는 경로
+|======================
+
+[source,bash]
+-----
+#adduser -h ${PGDATA} -s /bin/sh hypersql
+# 비밀번호 없이 (-D 옵션)
+adduser -D -h /var/lib/hypersql/ -s /bin/sh hypersql
+mkdir -p /hypersql/pg/14/data
+mkdir -p /hypersql/pg/14/log/pg_log
+mkdir -p /hypersql/pg/14/pg_wal
+mkdir -p /hypersql/pg/14/archive
+mkdir -p /run/hypersql
+chown -R hypersql:hypersql /run/hypersql
+chown -R hypersql:hypersql /hypersql
+-----
+
+=== 환경변수 설정 +
+[source, bash]
+-----
+[root@ccac1a317c5e:]$ cat << EOF >>/etc/profile.d/hypersql_env.sh
+#ref : https://www.postgresql.org/docs/current/libpq-envars.html
+#HyperSQL-PostgreSQL ENV
+PS1="[\u@\h:\W]$ "
+export PGVERSION=14
+export LD_LIBRARY_PATH=/usr/lib/postgresql$PGVERSION:$LD_LIBRARY_PATH
+export PGLIB=/usr/lib/postgresql$PGVERSION
+export PGHOME=/hypersql/pg
+export PGDATA=/hypersql/pg/$PGVERSION/data
+export PGHOST=/run/hypersql
+export PGUSER=postgres
+export PGDATABASE=postgres
+#HyperSQL-PostgreSQL ALIAS
+alias pglib="cd $PGLIB"
+alias pghome="cd $PGHOME"
+alias pgdata="cd $PGDATA"
+alias pglog="cd $PGHOME/$PGVERSION/log/pg_log"
+alias pgwal="cd $PGHOME/$PGVERSION/pg_wal"
+alias pgconf="vi $PGDATA/postgresql.conf"
+alias pghba="vi $PGDATA/pg_hba.conf"
+EOF
+
+[root@ccac1a317c5e:]$ source /etc/profile.d/hypersql_env.sh
+-----
+
+
+=== Database Cluster 생성 +
+[source, bash]
+-----
+su - hypersql
+
+initdb -U postgres -D $PGDATA -X /hypersql/pg/$PGVERSION/pg_wal
+-----
+
+=== postgresql.conf 수정
+[source, bash]
+-----
+[hypersql@ccac1a317c5e:]$ cat << EOF >> $PGDATA/postgresql.conf
+listen_addresses = '*'
+port = 5432
+unix_socket_directories = '/run/hypersql'
+logging_collector = on
+log_directory = '/hypersql/pg/14/log/pg_log'
+log_filename = 'postgresql-%Y-%m-%d-%H%M%S.log'
+log_rotation_age = 0
+log_rotation_size = 100MB
+EOF
+-----
+
+=== [선택] archive mode 설정
+해당 archive 디렉토리가 없거나 권한이 없을 경우에 archive 파일을 write할 수 없으므로 해당 디렉토리를 생성한 후에 archive_command를 설정합니다.
+
+[source,bash]
+[hypersql@ccac1a317c5e:]$ cat << EOF >> $PGDATA/postgresql.conf
+archive_mode = on
+archive_command = 'test ! -f /hypersql/pg/14/archive/%f && cp %p /hypersql/pg/14/archive/%f'
+EOF
+
+== 원격 및 로컬 Client 접속 설정
+- 원격의 PostgreSQL로 접속할 경우 $PGHOST, $PGPORT 환경변수를 지정합니다.
+[source, bash]
+[root@ccac1a317c5e:]$ su - hypersql
+[hypersql@ccac1a317c5e:]$ vi $PGDATA/postgresql.conf
+export PGHOST=원격 접속 IP
+export PGPORT=원격 PostgreSQL의 Port
+
+- postgresql.conf 설정
+[source, bash]
+[hypersql@ccac1a317c5e:]$ vi $PGDATA/postgresql.conf
+listen_addresses = '*'
+port = 5432
+
+- pg_hba.conf +
+허용할 IP 및 METHOD를 정의합니다.
+[source,bash]
+[hypersql@HyperSQL-PostgreSQL:~] vi $PGDATA/pg_hba.conf
+# TYPE    DATABASE        USER        ADDRESS        METHOD
+host      all             all         <IP>/<CIDR>      trust
+
+
+== PostgreSQl 서버 실행
+
+[source,bash]
+pg_ctl start -D $PGDATA
+
+== PostgreSQL 제거
+
+[source,sh]
+apk del postgresql14

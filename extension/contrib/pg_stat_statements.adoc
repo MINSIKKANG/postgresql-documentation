@@ -1,0 +1,9 @@
+= pg_stat_statements
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+pg_stat_statements는 아래 hypersql 내 별도 설명된 링크로 대체함
+
+https://github.com/hypersql/hypersql-postgresql-documentation/tree/main/docs/extension/pg_stat_statements

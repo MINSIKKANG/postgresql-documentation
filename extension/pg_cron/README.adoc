@@ -1,0 +1,361 @@
+= pg_cron extention
+:toc:
+:toc-title:
+
+== pg_cron 이란?
+
+참고 자료 : https://github.com/citusdata/pg_cron
+
+pg_cron은 데이터베이스 내부에서 확장으로 실행되는 PostgreSQL v10 이상 간단한 cron 기반 작업 스케줄러입니다. 일반 cron과 동일한 구문을 사용하지만 데이터베이스에서 직접 PostgreSQL 명령을 예약할 수 있습니다.
+
+pg_cron은 여러 작업을 병렬로 실행할 수 있지만 한 번에 최대 하나의 작업 인스턴스를 실행합니다. 첫 번째 실행이 완료되기 전에 두 번째 실행이 시작되어야 하는 경우 두 번째 실행은 대기열에 추가되어 첫 번째 실행이 완료되는 즉시 시작됩니다.
+
+스케쥴은 표준 cron 구문을 사용합니다. * 는 "매 기간마다 실행"을 의미하고 특정 숫자는 "해당 시간에만"을 의미합니다.
+
+ ┌───────────── min (0 - 59)
+ │ ┌────────────── hour (0 - 23)
+ │ │ ┌─────────────── day of month (1 - 31)
+ │ │ │ ┌──────────────── month (1 - 12)
+ │ │ │ │ ┌───────────────── day of week (0 - 6) (0 to 6 are Sunday to
+ │ │ │ │ │                  Saturday, or use names; 7 is also Sunday)
+ │ │ │ │ │
+ │ │ │ │ │
+ * * * * *
+
+
+== pg_cron install
+
+pg_cron 은 PostgreSQL version 과 맞게 설치할 것
+
+Red hat, CentOS, Amazon Linux 에 설치
+
+----
+# Insatll the pg_cron extention
+sudo yum install -y pg_cron_11
+----
+
+Debian, Ubuntu 에 설치
+----
+sudo apt-get -y install postgresql-11-cron
+----
+
+소스 설치 방식
+----
+git clone https://github.com/citusdata/pg_cron.git
+cd pg_cron
+# Ensure pg_config is in your path, e.g.
+export PATH=/usr/pgsql-11/bin:$PATH
+make && sudo PATH=$PATH make install
+----
+
+== pg_cron 세팅
+
+PostgreSQL 가 시작될 때 pg_cron background worker 를 시작하려면 postgresql.conf 파일의 shared_preload_libraries에 pg_cron을 추가해야 합니다.
+
+서버가 hot standby mode 라면 작업을 실행하지 않지만 서버가 promoted 된다면 자동으로 시작됩니다.
+
+----
+# add to postgresql.conf
+
+shared_preload_libraries = 'pg_cron'
+----
+
+기본적으로 pg_cron background worker 는 메타데이터 테이블이 "postgres" 데이터베이스에 생성될 것으로 예상합니다. 그러나 postgresql.conf에서 cron.database_name 구성 매개변수를 설정하여 이를 구성할 수 있습니다.
+
+----
+# add to postgresql.conf
+
+# optionally, specify the database in which the pg_cron background worker should run (defaults to postgres) 
+cron.database_name = 'postgres'
+----
+
+PostgreSQL 재시작 후 pg_cron extention 을 생성 및 pg_cron 에대한 권한도 부여해줍니다.
+
+----
+pg_ctl start
+
+-- run as superuser:
+CREATE EXTENSION pg_cron;
+
+-- optionally, grant usage to regular users:
+GRANT USAGE ON SCHEMA cron TO hello;
+----
+
+pg_cron extention 조회
+----
+postgres=# select * from pg_available_extensions where name ='pg_cron';
+  name   | default_version | installed_version |           comment            
+---------+-----------------+-------------------+------------------------------
+ pg_cron | 1.4             | 1.4               | Job scheduler for PostgreSQL
+(1 row)
+----
+
+*기본적으로 pg_cron은 libpq를 사용하여 pg_hba.conf에서 허용해야 하는 로컬 데이터베이스에 대한 새 연결을 엽니다.*
+*cron 작업을 실행하는 사용자에 대해 localhost에서 오는 연결에 대한 신뢰 인증을 활성화해야 할 수 있습니다.*
+*또는 libpq가 연결을 열 때 사용할 암호를 .pgpass 파일에 추가할 수 있습니다.*
+
+pg_cron 이 background worker 를 사용하도록 구성할 수 있습니다.
+이 경우 동시 작업 수는 max_worker_processed 설정에 의해 제한되므로 해당 값을 높여야 할 수 있습니다.
+
+----
+# Schedule jobs via background workers instead of localhost connections
+cron.use_background_workers = on
+
+# Increase the number of available background workers from the default of 8
+max_worker_processes = 20
+----
+
+== pg_cron Parameters
+
+다음은 pg_cron extention 동작을 제어하는 파라미터의 목록입니다.
+
+[%header]
+|===
+|Parameters|Description
+|cron.database_name| pg_cron 메타데이터가 보관되는 데이터베이스입니다.
+|cron.host| PostgreSQL에 연결할 호스트 이름입니다. 이 값은 수정할 수 없습니다.
+|cron.log_run| 실행 중인 모든 작업을 job_run_details 테이블에 기록합니다. 유효한 값은 on 또는 off입니다.
+|cron.log_statement| 모든 cron 문을 실행하기 전에 기록합니다. 유효한 값은 on 또는 off입니다.
+|cron.max_running_jobs|동시에 실행할 수 있는 최대 작업 수입니다.
+|cron.use_background_workers|클라이언트 세션 대신 백그라운드 작업자를 사용합니다. 이 값은 수정할 수 없습니다.
+|===
+
+pg_cron Parameter 조회 시
+----
+postgres=# SELECT name, setting, short_desc FROM pg_settings WHERE name LIKE 'cron.%' ORDER BY name;
+            name             |  setting  |                     short_desc                     
+-----------------------------+-----------+----------------------------------------------------
+ cron.database_name          | postgres  | Database in which pg_cron metadata is kept.
+ cron.enable_superuser_jobs  | on        | Allow jobs to be scheduled as superuser
+ cron.host                   | localhost | Hostname to connect to postgres.
+ cron.log_min_messages       | warning   | log_min_messages for the launcher bgworker.
+ cron.log_run                | on        | Log all jobs runs into the job_run_details table
+ cron.log_statement          | on        | Log all cron statements prior to execution.
+ cron.max_running_jobs       | 32        | Maximum number of jobs that can run concurrently.
+ cron.use_background_workers | off       | Use background workers instead of client sessions.
+(8 rows)
+----
+
+== cron.schedule() 함수
+
+해당 함수는 cron 작업을 예약합니다. 작업은 처음에 기본 postgres 데이터베이스에서 예약됩니다. 이 함수는 job id를 나타내는 bigint 값을 반환합니다.
+
+*구문*
+
+----
+cron.schedule (job_name,
+    schedule,
+    command
+);
+
+cron.schedule (schedule,
+    command
+);
+----
+
+*컬럼*
+
+[%header]
+|===
+|Parameters|Description
+|job_name|cron 작업의 이름입니다.
+|schedule|cron 작업의 일정을 나타내는 텍스트입니다. 형식은 표준 cron 형식입니다.
+|command|실행할 명령의 텍스트입니다.
+|===
+
+== cron.schedule_in_database() 함수
+
+해당 함수는 cron 작업을 데이터베이스 별로 예약합니다. 이 함수는 job id를 나타내는 bigint 값을 반환합니다.
+
+*구문*
+
+----
+cron.schedule_in_database (
+     job_name text,
+     schedule text,
+     command text,
+     database text,
+     username text DEFAULT NULL::text,
+     active boolean DEFAULT true
+)
+----
+
+*컬럼*
+
+[%header]
+|===
+|Parameters|Description
+|job_name|cron 작업의 이름입니다.
+|schedule|cron 작업의 일정을 나타내는 텍스트입니다. 형식은 표준 cron 형식입니다.
+|command|실행할 명령의 텍스트입니다.
+|database|작업을 예약할 데이터베이스 이름입니다.
+|username|작업을 수행시킬 유저 이름입니다.
+|active|작업을 on / off 할 수 있는 값입니다.
+|===
+
+
+== cron.unschedule() 함수
+
+이 함수는 cron 작업을 삭제합니다. job_name 또는 job_id를 전달할 수 있습니다. 
+정책은 사용자가 작업 일정을 제거할 수 있는 소유자인지를 확인합니다. 
+이 함수는 성공 또는 실패를 나타내는 boolean 값을 반환합니다.
+
+*구문*
+
+----
+cron.unschedule (job_id);
+
+cron.unschedule (job_name);
+----
+
+*컬럼*
+
+[%header]
+|===
+|Parameters|Description
+|job_id|cron 작업이 예약된 경우 cron.schedule 함수에서 반환된 작업 식별자입니다.
+|job_name|cron.schedule 함수로 예약된 cron 작업의 이름입니다.
+|===
+
+== cron.alter_job() 함수
+
+이 함수는 존재하는 작업을 수정하는데 사용됩니다.
+
+*구문*
+
+----
+cron.alter_job(
+     job_id bigint,
+     schedule text DEFAULT NULL::text,
+     command text DEFAULT NULL::text,
+     database text DEFAULT NULL::text,
+     username text DEFAULT NULL::text,
+     active boolean DEFAULT NULL::boolean
+)
+----
+
+== pg_cron TABLE
+
+해당 테이블은 cron 작업을 예약하고 작업 완료 방법을 기록하는데 사용됩니다.
+
+[%header]
+|===
+|Parameters|Description
+|cron.job|예약된 각 작업에 대한 메타데이터를 포함합니다. 이 테이블과의 대부분의 상호 작용은 cron.schedule 및 cron.unschedule 함수를 사용하여 수행해야 합니다.
+
+이 테이블에 직접 업데이트 또는 삽입 권한을 부여하지 않는 것이 좋습니다. 이렇게 하면 사용자가 username(으)로 실행되도록 rds-superuser 열을 업데이트할 수 있습니다.
+
+|cron.job_run_details|이전에 예약된 작업 실행에 대한 기록 정보를 포함합니다. 이는 실행한 작업에서 상태, 반환 메시지, 시작 및 종료 시간을 조사하는 데 유용합니다.
+|===
+
+아래와 같이 테이블 조회가 가능합니다.
+----
+postgres=# select * from cron.job;
+ jobid | schedule | command | nodename | nodeport | database | username | active | jobname 
+-------+----------+---------+----------+----------+----------+----------+--------+---------
+(0 rows)
+
+postgres=# select * from cron.job_run_details;
+ jobid | runid | job_pid | database | username | command | status | return_message | start_time | end_time 
+-------+-------+---------+----------+----------+---------+--------+----------------+------------+----------
+(0 rows)
+
+----
+
+*cron.job 테이블의 active 컬럼은 default 값이 t 로 되어 있으나 해당 값을 f 로 update 해주면 해당 작업은 수행되지 않음*
+
+
+== pg_cron 수행 예제
+
+*Table Vacuum*
+
+임의 테이블 하나를 만들고 pg_cron 을 이용한 정기적인 Vacuum 작업을 수행한다.
+
+1.임의 테이블 생성
+----
+postgres=# create table test(n int);
+CREATE TABLE
+----
+
+2.스케줄 생성
+----
+# test vacuum 이름을 가지고 1분 마다 test 테이블을 vacuum 하는 스케줄 생성
+
+postgres=# SELECT cron.schedule('test vacuum', '* * * * *', 'vacuum analyze test;');
+ schedule 
+----------
+        5
+(1 row)
+
+----
+
+3.스케줄 조회
+----
+postgres=# select * from cron.job;
+ jobid | schedule  |       command        | nodename  | nodeport | database | username | active |   jobname   
+-------+-----------+----------------------+-----------+----------+----------+----------+--------+-------------
+     5 | * * * * * | vacuum analyze test; | localhost |     5432 | postgres | postgres | t      | test vacuum
+(1 row)
+----
+
+4.스케줄 수행 이력 조회
+----
+postgres=# select * from cron.job_run_details;
+ jobid | runid | job_pid | database | username |            command            |  status   | return_message |          start_time           |           end_time   
+         
+-------+-------+---------+----------+----------+-------------------------------+-----------+----------------+-------------------------------+----------------------
+---------
+     5 |     7 |    8445 | postgres | postgres | vacuum analyze test;          | succeeded | VACUUM         | 2022-05-12 14:34:00.009511+09 | 2022-05-12 14:34:00.0
+21028+09
+     5 |     8 |    8525 | postgres | postgres | vacuum analyze test;          | succeeded | VACUUM         | 2022-05-12 14:35:00.00951+09  | 2022-05-12 14:35:00.0
+20938+09
+(2 rows)
+----
+
+*pg_cron log Table Delete*
+
+cron.log_run 파라미터를 off 하지 않는다면 실행 중인 모든 작업이 cron.job_run_details 에 기록됩니다. 따라서 시간이 지남에 따라 매우 커질 수 있는 cron 작업 기록을 자동으로 지워주는 작업을 생성해두는 것이 좋습니다. 예를 들어 아래와 같은 작업은 7 일 동안의 로그만 유지됩니다.
+
+----
+SELECT cron.schedule('0 0 * * *', $$DELETE 
+    FROM cron.job_run_details 
+    WHERE end_time < now() - interval '7 days'$$);
+----
+
+*Postgres 이외의 데이터베이스에 대한 cron 작업 생성*
+
+pg_cron의 메타데이터는 모두 postgres 라는 PostgreSQL 기본 데이터베이스에 보관됩니다. 백그라운드 작업자는 유지 관리 cron 작업을 실행하는 데 사용되므로 PostgreSQL DB 인스턴스 내의 모든 데이터베이스에서 작업을 예약할 수 있습니다.
+
+1.test_db 데이터베이스 생성
+----
+postgres=# create database test_db;
+CREATE DATABASE
+----
+
+
+2.cron.schedule 을 사용하는 것으로 작업을 생성
+----
+postgres=# SELECT cron.schedule('test_db vacuum', '* * * * *', 'vacuum analyze test;');
+ schedule 
+----------
+        9
+(1 row)
+----
+
+
+3.superuser 로 사용자는 방금 생성한 작업에 대한 데이터베이스 열을 업데이트 하여
+PostgreSQL DB 인스턴스 내의 다른 데이터베이스에서 실행되도록 합니다.
+----
+postgres=# UPDATE cron.job SET database = 'test_db' WHERE jobid = 8;
+UPDATE 0
+----
+
+
+4.업데이트 된 작업을 확인
+----
+postgres=# SELECT * FROM cron.job;                                                     
+ jobid | schedule  |       command        | nodename  | nodeport | database | username | active |    jobname     
+-------+-----------+----------------------+-----------+----------+----------+----------+--------+----------------
+     8 | * * * * * | vacuum analyze test; | localhost |     5432 | test_db | postgres | t      | test_db vacuum
+(1 row)
+----

@@ -1,0 +1,142 @@
+= pgaudit
+:toc:
+:toc-title:
+:table-caption!:
+:sectnums:
+
+pgaudit 홈페이지 : https://www.pgaudit.org/#section_three +
+git 주소 : https://github.com/pgaudit/pgaudit/blob/master/README.md +
+
+== pgaudit 란?
+
+postgreSQL에서 제공하는 표준 로깅 기능을 통해 자세한 세션 또는 개체 감사 로깅을 제공합니다. +
+pgaudit는 특정 기관이나 ISO 인증 감사를 통과하는데 필요한 로그를 생성하는 도구를 제공합니다. +
+
+* pgaudit.log : 세션 감사 로깅에 의해 기록될 명령문의 클래스를 지정.
+** READ : 소스가 관계 또는 쿼리인 경우 SELECT 및 COPY 
+** WRITE : 대상이 관계인 경우 INSERT, UPDATE, DELETE, TRUNCATE 및 COPY
+** ROLE : 역할 및 권한과 관련된 명령문
+** DDL : ROLE 클래스에 포함되지 않은 모든 DDL
+** MISC : 기타 명령 ( 예 : DISCARD, FETCH, CHECKPOINT, VACUUM, SET)
+** MISC_SET : 기타 SET 명령 ( 예 : SET ROLE ) 
+** ALL : 위에 모든 항목을 포함합니다 
+
+* pgaudit.log_catalog : 명령문의 모든 관계가 pg_catalog에 있는 경우 세션 로깅이 활성화되어야 함을 지정합니다. +
+이 설정을 비활성화하면 카탈로그를 많이 쿼리하는 psql 및 PgAdmin과 같은 도구의 로그 노이즈가 줄어듭니다. +
+(기본값은 ON) 
+* pgaudit.log_client : 그 메시지가 psql과 같은 클라이언트 프로세스에 표시되는지 여부를 지정합니다. +
+이 설정은 일반적으로 비활성화된 상태로 두어야 하지만 디버깅 또는 기타 목적에 유용할 수 있습니다. +
+(기본값은 OFF)
+* pgaudit.log_level : 로그 항목에 사용할 로그 수준을 지정합니다. +
+이 설정은 회귀 테스트에 사용되며 테스트 또는 기타 목적으로 최종 사용자에게 유용할 수도 있습니다. +
+(기본값은 log)
+* pgaudit.log_parameter : 감사 로깅이 명령문과 함께 전달된 매개변수를 포함해야 함을 지정합니다. +
+매개변수가 있으면 명령문 텍스트 뒤에 CSV 형식으로 포함됩니다. +
+(기본값은 OFF)
+* pgaudit.log_relation : 세션 감사 로깅이 SELECT 또는 DML 문에서 참조되는 각 관계(TABLE, VIEW 등)에 대해 별도의 로그 항목을 생성해야 하는지 여부를 지정합니다. +
+이것은 개체 감사 로깅을 사용하지 않고 철저한 로깅을 위한 유용한 바로 가기입니다. +
+(기본값은 OFF)
+* pgaudit.log_statement_once : 명령문/하위 명령문 조합의 첫 번째 로그 항목 또는 모든 항목과 함께 명령문 텍스트 및 매개변수를 로깅에 포함할지 여부를 지정합니다. +
+이 설정을 비활성화하면 자세한 로깅이 줄어들지만 로그 항목을 생성한 명령문을 판별하기가 더 어려워질 수 있지만 프로세스 ID와 함께 명령문/하위 명령문 쌍은 이전 항목과 함께 로그된 명령문 텍스트를 식별하기에 충분해야 합니다. +
+(기본값은 OFF)
+* pgaudit.log_role : 개체 감사 로깅에 사용할 마스터 역할을 지정합니다. 여러 감사 역할을 마스터 역할에 부여하여 정의할 수 있습니다. +
+이를 통해 여러 그룹이 감사 로깅의 다양한 측면을 담당할 수 있습니다. +
+(기본값은 NULL)
+
+
+
+
+
+== 설치 요구사항 
+pgaudit과 호환 되는 PostgreSQL 버전
+
+* pgAudit v1.7.X is intended to support PostgreSQL 15
+
+* pgAudit v1.6.X is intended to support PostgreSQL 14
+
+* pgAudit v1.5.X is intended to support PostgreSQL 13
+
+* pgAudit v1.4.X is intended to support PostgreSQL 12
+
+* pgAudit v1.3.X is intended to support PostgreSQL 11
+
+* pgAudit v1.2.X is intended to support PostgreSQL 10
+
+* pgAudit v1.1.X is intended to support PostgreSQL 9.6
+
+* pgAudit v1.0.X is intended to support PostgreSQL 9.5
+
+pgaudit 관련 패키지 (OS, postgreSQL 버전에 상이함)
+
+* centos-release-scl-rh
+* llvm-toolset-X-clang
+* openssl-devel
+* pgauditX_X-X
+
+== 설치 및 테스트
+
+설치를 누구나 할 수 있기 위해서 rpm 설치 권장
+
+* Source 설치 방법 +
+[ https://github.com/pgaudit/pgaudit ]
+
+
+* rpm 설치 방법 +
+
+rpm 설치 +
+----
+rpm 주소 : 
+http://mirror.centos.org/centos/7/extras/x86_64/Packages/centos-release-scl-rh-2-3.el7.centos.noarch.rpm
+http://mirror.centos.org/centos/7/sclo/x86_64/rh/Packages/l/llvm-toolset-7-clang-5.0.1-4.el7.x86_64.rpm
+http://mirror.centos.org/centos/7/os/x86_64/Packages/openssl-devel-1.0.2k-19.el7.x86_64.rpm
+
+# rpm -ivh http://mirror.centos.org/centos/7/extras/x86_64/Packages/centos-release-scl-rh-2-3.el7.centos.noarch.rpm
+
+# rpm -ivh http://mirror.centos.org/centos/7/sclo/x86_64/rh/Packages/l/llvm-toolset-7-clang-5.0.1-4.el7.x86_64.rpm
+
+# rpm -ivh http://mirror.centos.org/centos/7/os/x86_64/Packages/openssl-devel-1.0.2k-19.el7.x86_64.rpm
+
+# rpm -ivh pgaudit16_14-1.6.2-1.rhel7.x86_64.rpm
+----
+
+rpm 설치 후에는 pgaudit extension 생성 으로 이동
+
+
+pgaudit git clone +
+----
+$ git clone https://github.com/pgaudit/pgaudit.git 
+----
+
+source 설치 후 파라미터 수정 
+----
+$ cd pgaudit
+$ git checkout REL_14_STABLE 
+# chown -R hypersql:hypersql /usr/pgsql-14/
+# su - hypersql
+$ cd pgaudit 
+$ make install USE_PGXS=1 PG_CONFIG=/usr/pgsql-14/bin/pg_config
+$ cd /hypersql/pg/14/data
+$ vi postgresql.conf
+..
+shared_preload_libraries = 'pgaudit'
+..
+
+$ pg_ctl restart 
+----
+
+pgaudit extension 생성 
+----
+$ psql -U postgres
+Create Extension pgaudit ; 
+SELECT name,setting FROM pg_settings WHERE name LIKE 'pgaudit%';
+set pgaudit.log = 'read,write,ddl';
+CREATE TABLE table1 (id int, name text);
+INSERT INTO table1 (id, name) values (3, 'name3');
+SELECT * FROM table1;
+----
+
+pg.log 확인 
+----
+$ pglog 
+$ cat [로그 확인 ]
+----

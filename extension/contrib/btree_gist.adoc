@@ -1,0 +1,48 @@
+= btree_gist
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== btree_gist 설명
+btree_gist는 데이터 유형 int2, int4, int8, float4, float8, numeric, timestamp with time zone, timestamp without time zone, time with time zone, time without time zone, date, interval, oid, money, char, varchar, text, bytea, bit, varbit, macaddr, macaddr8, inet, cidr, uuid 그리고 모든 enum 유형에 대해 b-tree에 해당하는 동작을 구현하는 GiST 인덱스 연산자 클래스를 제공합니다.
+
+일반적으로 이러한 연산자 클래스는 동등한 표준 b-tree 인덱스 방법을 능가하지 않으며, 표준 b-tree 코드의 한가지 주요 기능인 고유성을 적용하는 기능이 부족합니다. 그러나 b-tree 인덱스에서 사용할 수 없는 몇가지 다른 기능을 제공합니다. 또한 이 연산자 클래스는 여러 컬럼의 GiST인덱스가 필요할 때 유용합니다.
+
+일반적인 b-tree 검색 연산자 외에도 <>("not equals")에 대한 인덱스 지원도 제공합니다. 또한 자연 거리 메트릭이 있는 데이터유형의 경우 거리 연산자<->를 정의하고 이를 사용하여 가장 가까운 이웃 검색에 대한 GiST 인덱스 지원을 제공합니다. int2, int4, int8, float4, float8, timestamp with time zone, timestamp without time zone, time without time zone, date, interval, oid, money 데이터 유형에 대해 거리 연산자가 제공됩니다.
+
+== btree_gist 예시
+btree_gist를 적용하는 예시
+[source, sql]
+----
+CREATE TABLE test (a int4);
+-- 인덱스 생성
+CREATE INDEX testidx ON test USING GIST (a);
+-- query
+SELECT * FROM test WHERE a < 10;
+-- 가까운 이웃검색: "42"에 가장 가까운 항목 10개 찾기
+SELECT *, a <-> 42 AS dist FROM test ORDER BY a <-> 42 LIMIT 10;
+----
+
+제외 제약조건을 같이 활용한 예시
+[source, sql]
+----
+CREATE TABLE zoo (
+  cage   INTEGER,
+  animal TEXT,
+  EXCLUDE USING GIST (cage WITH =, animal WITH <>)
+);
+
+INSERT INTO zoo VALUES(123, 'zebra');
+INSERT 0 1
+INSERT INTO zoo VALUES(123, 'zebra');
+INSERT 0 1
+INSERT INTO zoo VALUES(123, 'lion');
+ERROR:  conflicting key value violates exclusion constraint "zoo_cage_animal_excl"
+DETAIL:  Key (cage, animal)=(123, lion) conflicts with existing key (cage, animal)=(123, zebra).
+--같은 123 케이지에 zebra가 들어가있고 zebra만 insert가능한데, 
+--lion을 추가로 insert하려해서 에러메시지 출력
+=> INSERT INTO zoo VALUES(124, 'lion');
+INSERT 0 1
+--124 케이지로 lion을 insert시 에러 없이 insert확인
+----

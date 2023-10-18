@@ -1,0 +1,209 @@
+= pgcrypto
+:toc:
+:toc-title:
+:table-caption!:
+:sectnums:
+
+pgcrypto 홈페이지 : https://postgresql.kr/docs/11/pgcrypto.html +
+
+
+== pgcrypto 란?
+
+pgcrypto는 postgreSQL에서 사용할 수 있는 암호화 관련 함수를 제공합니다. +
+pgcrypto는 MD5,SHA,HMAC,AES,BLOWFISH,PGP,CRYPT 과 OpenSSL 지원으로 컴파일된 경우 DES 및 3DES를 사용하여 다양한 해싱 및 암호화 기능을 제공하는 암호화 extension 입니다.
+
+
+== 설치 요구사항 및 설명
+
+* 설치 요구사항 +
+
+** PostgreSQL contrib 에 포함되어 있는 Extension +
+따로 설치 요구사항이 필요하지 않음
+
+* 설명 +
+
+** crypt() 함수에서 지원하는 알고리즘
+|===
+|알고리즘|비밀번호 최대 길이|Adaptive|비트|출력 길이|설명
+|bf|72|있음|128|60|Blowfish 기반, variant 2a
+|mb5|제한없음|없음|48|34|MD5 기반 암호화
+|xdes|8|있음|24|20|확장 DES
+|des|8|없음|12|13|UNIX crypt
+|===
+
+== 테스트
+
+CREATE EXTENSION 
+----
+$ psql -U postgres
+$ CREATE EXTENSION pgcrypto;
+$ \dx 
+postgres=# \dx
+                    설치된 확장기능 목록
+   이름   | 버전 |   스키마   |             설명
+----------+------+------------+------------------------------
+ pgcrypto | 1.3  | public     | cryptographic functions
+ plpgsql  | 1.0  | pg_catalog | PL/pgSQL procedural language
+(2개 행)
+----
+
+
+TEST 데이터 확인 
+----
+$ select * from addr;
+postgres=# select * from addr ;
+ id |  code   | sido |  gugun   | dongri | bunji |       etc       |  etc2
+----+---------+------+----------+--------+-------+-----------------+--------
+  1 | 001-001 | 서울 | 강남구   | 가동   | 10-1  | A아파트 1동 110 | 1101호
+  2 | 001-002 | 서울 | 노원구   | 나동   | 10-2  | B아파트 1동 110 | 601호
+  3 | 001-003 | 서울 | 도봉구   | 다동   | 10-3  | C아파트 1동 110 | 1101호
+  4 | 001-004 | 서울 | 마포구   | 라동   | 10-4  | D아파트 1동 110 | 101호
+  5 | 001-005 | 서울 | 서대문구 | 마동   | 10-5  | F아파트 1동 110 | 1401호
+  6 | 001-006 | 서울 | 영등포구 | 바동   | 10-6  | G아파트 1동 110 | 1201호
+  7 | 001-007 | 서울 | 용산구   | 사동   | 10-7  | T아파트 1동 110 | 1101호
+  8 | 001-008 | 서울 | 중구     | 하동   | 10-8  | K아파트 1동 110 | 1105호
+(8개 행)
+----
+
+pgcrypto extension 암복호화 함수 확인 +
+- enckey : 사용자가 임의로 지정하는 부분으로 암복호화 시 키워드가 됨.
+----
+postgres=# \df
+                                         함수 목록
+ 스키마 |         이름          | 반환 자료형  |            인자 자료형             | 종류
+--------+-----------------------+--------------+------------------------------------+------
+ public | armor                 | text         | bytea                              | 함수
+ public | armor                 | text         | bytea, text[], text[]              | 함수
+ public | crypt                 | text         | text, text                         | 함수
+ public | dearmor               | bytea        | text                               | 함수
+ public | decrypt               | bytea        | bytea, bytea, text                 | 함수
+ public | decrypt_iv            | bytea        | bytea, bytea, bytea, text          | 함수
+ public | digest                | bytea        | bytea, text                        | 함수
+ public | digest                | bytea        | text, text                         | 함수
+ public | emp_comp              | integer      | p_sal integer, p_comm integer      | 함수
+ public | encrypt               | bytea        | bytea, bytea, text                 | 함수
+ public | encrypt_iv            | bytea        | bytea, bytea, bytea, text          | 함수
+ public | gen_random_bytes      | bytea        | integer                            | 함수
+ public | gen_salt              | text         | text                               | 함수
+ public | gen_salt              | text         | text, integer                      | 함수
+ public | hmac                  | bytea        | bytea, bytea, text                 | 함수
+ public | hmac                  | bytea        | text, text, text                   | 함수
+ public | new_empno             | integer      |                                    | 함수
+ public | pgp_armor_headers     | SETOF record | text, OUT key text, OUT value text | 함수
+ public | pgp_key_id            | text         | bytea                              | 함수
+ public | pgp_pub_decrypt       | text         | bytea, bytea                       | 함수
+ public | pgp_pub_decrypt       | text         | bytea, bytea, text                 | 함수
+ public | pgp_pub_decrypt       | text         | bytea, bytea, text, text           | 함수
+ public | pgp_pub_decrypt_bytea | bytea        | bytea, bytea                       | 함수
+ public | pgp_pub_decrypt_bytea | bytea        | bytea, bytea, text                 | 함수
+ public | pgp_pub_decrypt_bytea | bytea        | bytea, bytea, text, text           | 함수
+ public | pgp_pub_encrypt       | bytea        | text, bytea                        | 함수
+ public | pgp_pub_encrypt       | bytea        | text, bytea, text                  | 함수
+ public | pgp_pub_encrypt_bytea | bytea        | bytea, bytea                       | 함수
+ public | pgp_pub_encrypt_bytea | bytea        | bytea, bytea, text                 | 함수
+ public | pgp_sym_decrypt       | text         | bytea, text                        | 함수
+ public | pgp_sym_decrypt       | text         | bytea, text, text                  | 함수
+ public | pgp_sym_decrypt_bytea | bytea        | bytea, text                        | 함수
+ public | pgp_sym_decrypt_bytea | bytea        | bytea, text, text                  | 함수
+ public | pgp_sym_encrypt       | bytea        | text, text                         | 함수
+ public | pgp_sym_encrypt       | bytea        | text, text, text                   | 함수
+ public | pgp_sym_encrypt_bytea | bytea        | bytea, text                        | 함수
+ public | pgp_sym_encrypt_bytea | bytea        | bytea, text, text                  | 함수
+(37개 행)
+
+----
+
+pgcrypto function 활용 
+----
+$ select pgp_sym_encrypt(etc,'enckey') from addr; 
+postgres=# select pgp_sym_encrypt(etc,'enckey') from addr;
+                                                                               pgp_sym_encrypt
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ \xc30d04070302ff030fb47e52a1926ad24401028530efa8b0617610164f7b5aa03257b555a05980aef5f9499f91e4506407848c794052fb781f4a4c82c742133818ebbd78d9a7d87c225b89c4593ea271b324879c3f
+ \xc30d040703021fcf530e4a27aefd6ed244010c3ce3aff3bf03f923a42c1c91a38c7480534037e41c2ac642b1e943c2e03e5ba8e7e432844a3312835a3f4f333207db360c2cb86d2d3f752b2a9491a06fa1c1fe0d8b
+ \xc30d040703025553ae6327b5cdc47cd24401f9354b333825da4e94e77d432f99e02d995ae13f3f2e7f28f1be1d3a186b565daab449857f35703d150498806bd5be96931433d9202c02a781a60c37f74903f6f14e89
+ \xc30d0407030207292a3f551988a368d24401536c9ae0b26f1233e54fd1f4e60013696e0369d20c8de99c6a5c71a3ff7abfe015ccef9a4f08b04a0d6cf402d90eb1e2ee8943d609e4dbb3ddc3a3e7eaf78723f04002
+ \xc30d04070302bf41d171f9c6a9a876d24401a6c618339851e050fed7bfc761361e655c7527e92b4062a1700ca0097822743970fe1d53e60eef287fc1d3f91d2e69f4adf2d8704729da39817f20ca368f0d8ba63b22
+ \xc30d04070302c76c3b95502a0ec36fd244011f5b6e1a1be2b3ecb1d4fae6120a407197cb998ee4ddf4ef9aea5632972952680da8a06a0cc7a759df5ac7e44841c50e2daf2cd6a50cbc6300606dbe028cf82186c797
+ \xc30d040703024665789c28f939b06cd2440102b53a39e560a6d7276210c8e7e18b33e328d0f2d15e657641edbd20b34c3b43249d13555d0eecc36346895265a4f6381b7922f73aaba9c1ac19d588d1588aa3972f7a
+ \xc30d04070302d7adca0a651d828377d244011046f4547709bab8be3a82b61a5d3c654bfdf0cafc8162f10cd0107ee07df6f569c6d0ab22ff78909ec81d54686f054a35ac1a0f19ff04388440aa0aacd4292ffd2bda
+(8개 행)
+
+----
+
+상세 주소 부분 암호화처리 update 
+----
+$ update addr set etc=pgp_sym_encrypt(a.etc,'enckey') from addr a left join addr b on a.id = b.id;
+$ update addr set etc2=pgp_sym_encrypt(a.etc,'enckey') from addr a left join addr b on a.id = b.id;
+
+$ select * from addr; 
+postgres=# select * from addr;
+ id |  code   | sido |  gugun   | dongri | bunji |                                                                                     etc
+                                     |
+                                                                                          etc2
+
+----+---------+------+----------+--------+-------+-----------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------+-----------------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+--------------------------------------------------------------------------------------------------------------------------------------------------
+  1 | 001-001 | 서울 | 강남구   | 가동   | 10-1  | \xc30d040703027e3a1385ee2f895d61d24401f2174bb77432f554394f6d4848d8a10dc83d797f9bb32363174826bdf93f7dd1b28c221591709b60cc0390daa7f23bd8f1
+a0efd1d9a93a17e3b1988ba50700ccc2a7e9 | \xc30d040703026edf2ac4c881f11866d2c01d01c5afb013dd01ed2799d7e2a5710fb3a74ff7469251347a99c755e87809d83d15e637ed94f01d047adcac8f97de6a5527c38a435b1e16
+2f54efc663120bb39b10492a1adfd12aad0f7d196061653d16f5aac78f4c70ef0179f458a71e8ed1f74a96faabc7fd6a9142d6dc2cd6c2c3c85b53da3e9c205d6c27e7820644b9c8a3e4224379705f1c40083c534fda64447f1300ee543
+a8c8b5007e546bc5ad068368b190b94b7483f21100668817aab2c67479a61a11d1ac9d9b471bcfe489e4eff42ae0024235b1ae0a3ca9e2a08d33e3b044ac0a554b238a50ff030d553
+  2 | 001-002 | 서울 | 노원구   | 나동   | 10-2  | \xc30d04070302d47df5b5f605c5a261d244012eacf025146496f35c99e06c7d27fd6557c4ba29304425cda5dc1f0c2536d91d187e2ebaf35317e02368b41696847f6814
+0cf019e66580cf89df792a0250bdc07c5ae3 | \xc30d040703027485c691800cd40a7ed2c01d01824cdda1245b4e841076fefa638eea01a23f7d266e3cb60e2448b5262d05354544de1b0c26abca33dc403c8e95c9a42c5cfb2a6cfaca
+f0398de7e6c5887d6007f807508ca96b6b10a59978fc3e0db0ed6d0c198f9ba4461b6fe2824f1977f1b8d63f74a250cd227fd98c8ebc5764174bd12f7ee01c02c299a0ed4303dc0df1bac2eabcbce4f1bd294aeaf42151d2caae670bc9f
+049cbfb60e7c8fe72a4a739c07ea5d9e3f3567537f1644e23f8df7845650994c34d4ab2110df1bf83ac5a67bca85a7c2114aca233b087448cf7b63720b94999562e558dceb347ece1
+  3 | 001-003 | 서울 | 도봉구   | 다동   | 10-3  | \xc30d040703027915c6dc4649541363d2440112ec27339ef65c9acc229afa7034ad59c9dafc43563865a4e0c4c6c2baaaa83113eeeb881dbf975685bbb478250fcf4c3f
+db68811302e199458feba60689019116e936 | \xc30d040703022193a37a8f627b2c71d2c01d0156942c58a2b589985f11c997971a0d5af50dcd530c68b07bca2edfa1e784aa4e2edc04bafaf2d77d0099a905fcf7fbf9caf5c285bd19
+7c0887e90552ee3e148ec8f36f39ad83c7f905459bab1b1e7eff2f666cb43254fc01c5be95cd317e724f237bb4fb64cc39604a90bd0a6b674c2a179daad1e908aa9ed740a59ad8ba5d53bae417cd52d2e9ef17e3e8412f2458f5082170a
+f79f63ceb1f7aa19b2397f0de0fb029931076ca6c56882cf16f3bf5d6bbd6e8ef86f340106cd1b4719d07ce55fc8f88c289a4a5944d5a9cfa6c04b3f20f95ffaaa60ec48783b74734
+  4 | 001-004 | 서울 | 마포구   | 라동   | 10-4  | \xc30d0407030299ced858f278eea86fd244017077abd333c5fc5138255295208f87c51c2f50877b478fb272cfa61362d58f19976c775f4f226236f24728c951a722823c
+c0eaec9b7453931bde1e54a843a6ce38356f | \xc30d0407030238108f99d18cb82e7ed2c01d01b3146b286f631b65fa893f427bca7142587a98784d953d11b105527006875bfb563386bb1f927ec54b780ecade284244ff0c0d44b8f4
+fca01d22c0485d02dae5d07fdffcb54d35f842f361c64a4eb4c0f4fa56b44bc559a5f581d9a42289ddd55dd1a7dd5be5ed346b9d7733166d02a97e40c1fdf48de46336908e4ce0a750b9ab9056ffb1dfae9cce29c683889b2813d696d8a
+03360e691b858fc07ef3189efeabacb705e9b89b63df30709a7de3566c1da20e5e0f87447ffe7eaf87cfae6a71e7f8b15ac860150f21816e6b758e44eec31595278438a6666cd99df
+  5 | 001-005 | 서울 | 서대문구 | 마동   | 10-5  | \xc30d040703022945dc324d3257117bd244015a4f5454841d505f964f19eb1144cb09cc6c983e5fc0372261abe30357303b51dda6896d8a96814b3a0582aa57b7ab1a55
+5fe6d6ae37b810a04bd77a24a16ccdc6679a | \xc30d04070302fafdf79cfc9569c57bd2c01d015a85f05be83d39196f7955024fb69b529e6de4510cca6c8d77d24fc0e384c39b4337eebb0218eb7856823e0e521bfb25b92692b3e35b
+a805d5187e94b102f12c29f686d2d0d1226bcad2598d1717f1c2694de1ceca9b8f354715aa80dc393cfd769bdc7a1d927e8afece76fee68278b22f5a6c4ff4be4b84ab654a56ae4562eaf4a9ac58b45a8d968c030a384e1fb6bcd600d78
+248ce41b70cab4e067452e8b16206a97b0968e08a61beca5e3fa1519e115a8949d14a219e3ee719a787435a96bd9d9af3a54fc0c95c781f1849836ff3985c33a8ccc06243922ab23c
+  6 | 001-006 | 서울 | 영등포구 | 바동   | 10-6  | \xc30d0407030229168714f1fbae7961d244016229d79cfd10e64a8d9822ca6fd867895a6a1829b38b46f3ef3bef5650c584bb78c2d6bfcf997ac6e2db62b10635a3cb98
+c5762bfc6117b482b871663cd3e4476dbeea | \xc30d040703021cb583a00104484663d2c01d01f4b1971cc10b2abf186d2083b2affaf60b0c3d1e407cfb5774834318e71fd87df224cd8b291274836523ef2f1c7abe2862c82f3e4a09
+5a47c33c816123b7144a798d65803442d0ca0f86614f3f0fd567c7d35fb6139e766912d804cc8c1238fe2dd1b4546f4940871b714d372462f6edcfb12be7db846ad0d66d16747335787bd435988c46b29863729f048b21045192fa6e27a
+9cb5baedaba46aa0ecd13ed2605ac154d2ee5c3d022911d57e4d9688697daa851197164ec5c89887f03a602a840e098ce26219de6f044120cfbc710dec886ae03c6246b59625e789c
+  7 | 001-007 | 서울 | 용산구   | 사동   | 10-7  | \xc30d04070302c5261a2fff4b635c71d244014468d27331a193ab69d7cfc9cdf77c7707d2d3d51fbc8725809471157907c75b9557e50801b810814ba7ad01d22917a22a
+04f7e3ef1e915fe922719728e92a11a24f42 | \xc30d040703024578c05f2f9bf99668d2c01d01ef37185e29d30df3c482117accd0ed6987e4854a577bd1eb0e06022de739396b76314e875b4ce7eeebf7839f0b6419b4874690104ff1
+05a97c4ca22dc2f3e232cd34c818ccc855d044d34e52e7096ac84d41c7258fb30bb74eac289f2b14fd4764b63ee1723bd1cfd30e96b5ee8d259c1c66139365f7cf560bcd5f7a5c245296462b8df0a382cdc020ff4cadaeb0d5393294edb
+2c8548c418d44caa6e43c3a5d4385cf8386ec1a0daae945a978c46f1162334359d8f89b72bfc8db57fd49a4ce20b5d1057f1342a35a6f1108334a8dc7ea6608f3a06e1e143ac27fb5
+  8 | 001-008 | 서울 | 중구     | 하동   | 10-8  | \xc30d04070302916a9e49150f0cb279d24401d250a155379061434deed99a1d2bbaaa98942a68045cf7b4c235a0c03acce3fa4a456a691f8f09e136e7829347f08b1495
+30b48a6eecc85d6a69df6c904bc4fe70a47d | \xc30d040703028a03e3e193f3694579d2c01d01c6c3b90d0938e7fb904f8f42b21e5f7b56932ad46a04eb4fb5ac27a32ba9a6dbb4c9c05fa29b847aeb34b248c6dc6504ded1760ed8f6
+e6093e58077c084d070b9195e6c272f6bcf2270f323255fb639261421750c2b3da0f233ed5edafe141bc002543fd06d9243ec1e7389c303c726fffb477e66a76b96ba39899803903ff58e0926b234d515f077ffb2613948e051c2ba767d
+68454afa99c1bbcb5944f912dd83db36dc5bb0022c1555abb4182af9baa32d6e3d725f36609d712fe7d96f50d59a8b722db639c4b7b6735b56a44170ecfd8f00c62c97a808bbb07cf
+(8개 행)
+----
+
+decrypt 활용
+----
+$ select * from addr where id = 1; 
+postgres=# select * from addr where id = 1;
+ id |  code   | sido | gugun  | dongri | bunji |                                                                                     etc
+                                   |
+                                                                                        etc2
+
+----+---------+------+--------+--------+-------+-------------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------+-------------------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------------------------
+  1 | 001-001 | 서울 | 강남구 | 가동   | 10-1  | \xc30d040703027e3a1385ee2f895d61d24401f2174bb77432f554394f6d4848d8a10dc83d797f9bb32363174826bdf93f7dd1b28c221591709b60cc0390daa7f23bd8f1a0
+efd1d9a93a17e3b1988ba50700ccc2a7e9 | \xc30d040703026edf2ac4c881f11866d2c01d01c5afb013dd01ed2799d7e2a5710fb3a74ff7469251347a99c755e87809d83d15e637ed94f01d047adcac8f97de6a5527c38a435b1e162f
+54efc663120bb39b10492a1adfd12aad0f7d196061653d16f5aac78f4c70ef0179f458a71e8ed1f74a96faabc7fd6a9142d6dc2cd6c2c3c85b53da3e9c205d6c27e7820644b9c8a3e4224379705f1c40083c534fda64447f1300ee543a8
+c8b5007e546bc5ad068368b190b94b7483f21100668817aab2c67479a61a11d1ac9d9b471bcfe489e4eff42ae0024235b1ae0a3ca9e2a08d33e3b044ac0a554b238a50ff030d553
+(1개 행)
+
+$ select pgp_sym_decrypt(etc::bytea,'enckey') from addr where id = 1;
+postgres=# select pgp_sym_decrypt(etc::bytea,'enckey') from addr where id = 1;
+ pgp_sym_decrypt
+-----------------
+ A아파트 1동 110
+(1개 행)
+
+----

@@ -1,0 +1,145 @@
+= pg_upgrade
+:toc: 
+:toc-title: 목차
+:sectlinks:
+
+== 1. pg_upgrade 란?
+- 공식 문서 참고 : https://www.postgresql.org/docs/current/pgupgrade.html
+
+pg_upgrade (이전에는 pg_migrator 라고 함)를 사용하면 PostgreSQL 데이터 파일에 저장된 데이터를 주 버전 업그레이드에 일반적으로 필요한 데이터 덤프/재로드 없이 최신 PostgreSQL 주 버전으로 업그레이드할 수 있습니다(예: 9.5.8에서 9.6.4로 또는 10.7에서 11.2로).
+
+마이너 버전 업그레이드(예: 9.6.2에서 9.6.3으로 또는 10.1에서 10.2로)에는 필요하지 않습니다.
+
+주요 PostgreSQL 릴리스는 시스템 테이블의 레이아웃을 자주 변경하는 새로운 기능을 정기적으로 추가하지만 내부 데이터 저장 형식은 거의 변경되지 않습니다. 
+
+pg_upgrade 는 이 사실을 사용하여 새 시스템 테이블을 생성하고 단순히 이전 사용자 데이터 파일을 재사용함으로써 신속한 업그레이드를 수행합니다.
+
+향후 주요 릴리스에서 이전 데이터 형식을 읽을 수 없도록 데이터 저장 형식을 변경하는 경우 pg_upgrade 를 해당 업그레이드에 사용할 수 없습니다. (커뮤니티는 이러한 상황을 피하기 위해 노력할 것입니다.)
+
+pg_upgrade 는 예를 들어 32/64비트 바이너리를 포함하여 호환 가능한 컴파일 시간 설정을 확인하여 이전 클러스터와 새 클러스터가 바이너리 호환되는지 확인하기 위해 최선을 다합니다. 
+
+pg_upgrade 로 확인할 수는 없지만 모든 외부 모듈도 바이너리와 호환되는 것이 중요합니다.
+
+pg_upgrade는 스냅샷 및 베타 릴리스를 포함하여 8.4.X 이상에서 PostgreSQL 의 현재 주요 릴리스로의 업그레이드를 지원합니다.
+
+== 2. pg_upgrade 옵션
+=== 기본 실행
+----
+pg_upgrade -b oldbindir -B newbindir -d oldconfigdir -D newconfigdir[ option...]
+----
+
+- `-b bindir` or `--old-bindir=bindir` +
+이전 PostgreSQL 실행 디렉토리 (environment variable PGBINOLD)
+
+- `-B bindir` or `--new-bindir=bindir` +
+새로운 PostgreSQL 실행 디렉토리 (environment variable PGBINNEW)
+
+- `-c` or `--check` +
+데이터 변경 없이 양쪽 클러스터 체크
+
+- `-d configdir` or `--old-datadir=configdir` +
+이전 데이터베이스 클러스터 환경 디렉토리 (environment variable PGDATAOLD)
+
+- `-D configdir` or `--new-datadir=configdir` +
+새로운 데이터베이스 클러스터 환경 디렉토리 (environment variable PGDATANEW)
+
+- `-j njobs` or `--jobs=njobs` +
+수행 시 사용할 프로세스나 스레드 수
+
+- `-p port` or `--old-port=port` +
+이전 클러스터 포트 (environment variable PGPORTOLD)
+
+- `-P port` or `--new-port=port` +
+새로운 클러스터 포트 (environment variable PGPORTNEW)
+
+
+== 3. pg_upgrade 테스트
+
+=== 3-1. 기존 PostgreSQL 설치 디렉토리 확인
+- 버전 별 설치 디렉토리를 사용하는 PostgreSQL은 디렉토리를 변경할 필요가 없음 ( ex. /var/lib/pgsql/11 )
+- 설치 디렉토리가 버전별이 아닌 경우 새로운 PostgreSQL 설치를 방해하지 않도록 현재 PostgreSQL 설치 디렉토리를 확인해야함 +
+이전 디렉토리가 /usr/local/pgsql 이라고 가정하면 다음과 같이 수행할 수 있음 +
+`mv /usr/local/pgsql /usr/local/pgsql.old`
+
+*기존 PostgreSQL 설치 디렉토리*
+----
+/usr/pgsql-11
+/var/lib/pgsql/11
+----
+
+
+=== 3-2. 새로운 버전의 PostgreSQL 설치
+- 소스 설치의 경우 지정 위치에 새 서버를 설치하려면 prefix 변수 설정 `make prefix=/usr/local/pgsql.new install` 
+- yum / rpm install 후 새로운 버전 PostgreSQL 디렉토리
+
+*새로운 버전 PostgreSQL 설치 디렉토리*
+----
+/usr/pgsql-14
+/var/lib/pgsql/14
+----
+
+=== 3-3. initdb 를 수행하여 새로운 클러스터 생성 
+- 이전 클러스터와 같은 호환되는 flag로 생성할 것 
+
+- Extentions / custom modules 는 이전 서버와 동일하게 새로운 서버에도 적용을 해주어야함 + 
+스키마 생성까지 할 필요는 없음 ( ex. CREATE EXTENTION pgcrypto ..)
+
+- Custom full-text search file 들은 모두 새로운 서버로 Copy 해주어야함
+
+- 새로운 버전 PostgreSQL 서버를 기동은 하지 않음
+
+*새로운 버전 PostgreSQL initdb*
+----
+/usr/pgsql-14/bin/initdb
+----
+
+=== 3-4. 인증 설정
+
+- pg_upgrade 는 이전 서버 또는 새로운 서버에 여러번 연결하기 때문에 +
+pg_hba.conf 파일 수정이나 ~/.pgpass 을 설정 필요
+
+*새로운 버전 PostgreSQL pg_hba.conf*
+----
+-- 테스트를 위한 설정
+host    all     all     0.0.0.0/0       trust
+----
+
+=== 3-5. 두 서버 모두 종료
+
+- upgrade 대상 서버 및 새로운 버전의 서버 모두 종료
+
+----
+/usr/pgsql-11/bin/pg_ctl stop
+/usr/pgsql-14/bin/pg_ctl stop
+----
+
+=== 3-6. pg_upgrade 실행
+
+- 새로운 서버 바이너리의 pg_upgrade 수행 할 것
+- 실행 후 pg_upgrade 는 두 클러스터들이 호환되는지 체크함 +
+pg_update --check 를 통해 확인할 수 있음
+- 업그레이드 진행 시 클러스터에 액세스하면 안됨
+
+----
+pg_upgrade -b /usr/pgsql-11/bin -B /usr/pgsql-14/bin -d /var/lib/pgsql/11/data -D /var/lib/pgsql/14/data
+----
+
+=== 3-7. 파일 복원
+
+- 새로운 클러스터와 이전 클러스터의 동일한 설정이 필요하다면 설정 파일들은 매칭 시켜주어야함
+
+----
+ex)
+pg_hba.conf 설정 복원
+postgresql.conf 및 postgresql.auto.conf
+data 경로 포함된 모든 파일
+
+ex)
+cp /var/lib/pgsql/11/data/postgresql.conf /var/lib/pgsql/14/data/postgresql.conf
+cp /var/lib/pgsql/11/data/pg_hba.conf /var/lib/pgsql/14/data/pg_hba.conf
+----
+
+=== 3-8. 새로운 서버 기동
+----
+/usr/pgsql-14/bin/pg_ctl start
+----

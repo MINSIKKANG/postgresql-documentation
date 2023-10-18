@@ -1,0 +1,116 @@
+= psql
+:toc:
+:toc-title:
+:setnums:
+:sectnums:
+
+== psql 이란?
+PostgreSQL 에 대한 터미널 기반 프론트엔드 입니다. 이를 통해 대화형으로 쿼리를 입력하고 PostgreSQL에 실행하고
+쿼리 결과를 볼 수 있습니다.
+
+그리고 많은양의 메타 명령어들을 제공하고 스크립트를 작성하고 다양한 작업을 용이하게하는
+다양한 쉘과 같은 기능을 제공합니다.
+
+== psql 옵션
+----
+psql [option...] [dbname [username]]
+----
+
+=== 일반 옵션
+
+* `-c`
+** 하나의 명령(SQL 또는 내부 명령)만 실행하고 끝냅니다.
+
+* `-d`
+**  연결할 데이터베이스 이름입니다.
+
+* `-f`
+** 파일안에 지정한 명령을 실행하고 끝냅니다.
+
+* `-l --list`
+** 사용 가능한 데이터베이스 목록을 표시하고 끝냅니다.
+
+* `-v --set=, --variable-NAME,VALUE`
+** psql 변수 NAME 을 VALUE값으로 설정합니다.
+
+* `-V --version`
+** 버전 정보를 보여주고 끝냅니다.
+
+* `-X --no-psqlrc`
+** 시작파일(~/.psqlrc)을 읽지 않습니다.
+
+* `-1 --single-transaction`
+** 명령 파일을 하나의 트랜잭션으로 실행합니다.
+
+* `-a --echo-all`
+** 스크립트의 모든 입력 표시합니다.
+
+* `-b --echo-errors`
+** 실패한 명령들 출력합니다.
+
+* `-e --echo-queries`
+** 서버로 보낸 명령 표시합니다.
+
+* `-E --echo-hidden`
+** 내부 명령이 생성하는 쿼리를 표시합니다.
+
+* `-L --log-file=FILENAME`
+** 세션 로그를 파일로 보냅니다.
+
+* `-n --no-readline`
+** 확장된 명령행 편집 기능을 사용중지합니다.(readline) 			
+
+* `-o --output=FILENAME`
+** 쿼리 결과를 파일(또는 |파이프)로 보냅니다.
+
+* `-q --quiet`
+** 자동 실행(메시지 없이 쿼리 결과만 표시)합니다.
+
+* `-s --single-step`
+** 단독 순차 모드(각 쿼리 확인)
+
+* `-S --single-line`
+**  한 줄 모드(줄 끝에서 SQL 명령이 종료됨)
+
+
+== psql 메타명령
+
+psql을 사용하여 PostgreSQL에 연결하여 실행 가능한 psql 메타명령 목록
+
+=== 정보보기
+*(S : 시스템 개체 표시, + : 추가 상세 정보)*
+[width="500%", options="header",cols="2,3a"]
+|==================
+|명령어|설명
+|\d[S+]	|테이블, 뷰 및 시퀀스 목록
+|\d[S+] NAME | 테이블, 뷰, 시퀀스 또는 인덱스 설명
+|\da[S] [PATTERN] | 집계 함수 목록
+|\dA[+] [PATTERN] | 접근 방법 목록
+|\db[+] [PATTERN]	| 테이블스페이스 목록
+|\ddp [PATTERN]	| 기본 접근권한 목록
+|\dew[+] [PATTERN] | 외부 데이터 래퍼(FDW) 목록
+|\df[anptw][S+] [PATRN] | [agg/normal/procedures/trigger/window] 함수 목록
+|\dg[S+] [PATTERN] | 롤 목록
+|\di[S+] [PATTERN] | 인덱스 목록
+|\dl | 큰 개체 목록, \lo_list 명령과 같음
+|\dL[S+] [PATTERN] |	프로시져 언어 목록
+|\dm[S+] [PATTERN] |materialized 뷰 목록
+|\dn[S+] [PATTERN] |스키마 목록
+|\do[S] [PATTERN] | 연산자 목록
+|\dO[S+] [PATTERN] | collation 목록
+|\dp [PATTERN] | 테이블, 뷰 및 시퀀스 액세스 권한 목록
+|\dP[itn+] [PATTERN] | 파티션 릴레이션 목록 [인덱스/테이블만] [n=nested]
+|\drds [PATRN1 [PATRN2]] | 데이터베이스별 롤 설정 목록
+|\dRp[+] [PATTERN] | 복제 발행(publication) 목록
+|\dRs[+] [PATTERN] | 복제 구독(subscription) 목록
+|\ds[S+] [PATTERN] | 시퀀스(sequence) 목록
+|\dt[S+] [PATTERN] | 테이블(table) 목록
+|\dT[S+] [PATTERN] | 데이터 형식 목록
+|\du[S+] [PATTERN] | 롤 목록
+|\dv[S+] [PATTERN] | 뷰 목록
+|\dx[+] [PATTERN] | 확장 모듈 목록
+|\dy [PATTERN] | 이벤트 트리거 목록
+|\l[+] [PATTERN] | 데이터베이스 목록
+|\sf[+] 함수이름 |함수 정의 보기
+|\sv[+] 뷰이름| 뷰 정의 보기
+|=====================

@@ -1,0 +1,484 @@
+= pageinspect
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== pageinspect 설명
+pageinspect는 디버깅 목적으로 low level에서 데이터베이스 페이지의 내용을 검사할 수 있는 function을 제공합니다.
+
+*일반 function*
+
+* get_raw_page(relname text, fork text, blkno bigint) returns bytea
+
+명명된 relation의 지정된 블록을 읽고 복사본을 bytea 값으로 반환합니다. 이렇게 하면 블록의 일관된 복사본을 얻을 수 있습니다. fork는 main 데이터 fork, fsm은 free space map, vm은 visibility map, init은 initializtion fork를 의미합니다.
+
+* get_raw_page(relname text, blkno bigint) returns bytea
+
+main fork에서 읽기 위한 get_raw_page의 축약된 버전입니다.
+
+* page_header(page bytea) returns record
+
+모든 PostgreSQL 힙 및 인덱스 페이지에 공통적인 필드를 표시합니다.
+
+예)
+[source, sql]
+----
+SELECT * FROM page_header(get_raw_page('pg_class', 0));
+    lsn    | checksum | flags  | lower | upper | special | pagesize | version | prune_xid
+-----------+----------+--------+-------+-------+---------+----------+---------+-----------
+ 0/24A1B50 |        0 |      1 |   232 |   368 |    8192 |     8192 |       4 |         0
+----
+
+checksum 필드는 페이지에 저장된 체크섬이며 페이지가 손상된 경우 올바르지 않을 수 있습니다. 데이터 체크섬이 활성화 되지 않은 경우 저장된 값은 의미가 없습니다.
+
+* page_checksum(page bytea, blkno bigint) returns smallint
+
+주어진 블록에 있는 것처럼 페이지의 체크섬을 계산합니다.
+
+예) 
+[source, sql]
+----
+SELECT page_checksum(get_raw_page('pg_class', 0), 0);
+ page_checksum
+---------------
+         13443
+----
+
+체크섬은 블록 번호에 따라 다르므로 일치하는 블록 번호를 전달해야 합니다. 이 함수로 계산된 체크섬은 page_header의 checksum 결과 필드와 비교할 수 있고, 인스턴스에 데이터 체크섬이 활성화 된 경우 이 두 값이 같아야 합니다.
+
+* fsm_page_contents(page bytea) returns text
+
+fsm 페이지의 내부 노드 구조를 보여줍니다.
+
+예) 
+[source, sql]
+----
+SELECT fsm_page_contents(get_raw_page('pg_class', 'fsm', 0));
+ fsm_page_contents 
+-------------------
+ 0: 89            +
+ 1: 89            +
+ 3: 89            +
+ 7: 89            +
+ 15: 89           +
+ 31: 89           +
+ 63: 89           +
+ 127: 89          +
+ 255: 89          +
+ 511: 89          +
+ 1023: 89         +
+ 2047: 89         +
+ 4095: 89         +
+ fp_next_slot: 0  +
+ 
+(1 row)
+----
+
+페이지 내 이진 트리의 노드당 한줄로 된 여러 줄 문자열입니다. 0이 아닌 노드만 출력됩니다. 또한 페이지에서 반환될 다음 slot을 가리키는 포인터도 출력됩니다.
+
+*heap function*
+
+* heap_page_items(page bytea) returns setof record
+
+힙 페이지의 모든 라인 포인터를 보여줍니다. 사용 중인 라인 포인터의 경우 튜플 헤더와 튜플 raw 데이터도 표시됩니다. raw 페이지가 복사될 때 MVCC 스냅샷에 튜플이 표시되었는지 여부에 관계없이 모든 튜플이 표시됩니다.
+
+* tuple_data_split(rel_oid oid, t_data bytea, t_infomask integer, t_infomask2 integer, t_bits text [, do_detoast bool]) returns bytea[]
+
+백엔드 내부와 동일한 방식으로 튜플 데이터를 속성으로 분할합니다.
+
+* heap_page_item_attrs(page bytea, rel_oid regclass [, do_detoast bool]) returns setof record
+
+튜플 raw 데이터를 선택적으로 detoast할 수 있는 속성의 배열로 반환합니다.
+
+* heap_tuple_infomask_flags(t_infomask integer, t_infomask2 integer) returns record
+
+모든 플래그에 대한 하나의 열과 결합된 플래그에 대한 하나의 열이 있는 플래그 이름으로 구성된 사람이 읽을 수 있는 배열 집합으로, 반환된 t_infomask 및 t_infomask2를 디코딩합니다.
+
+*btree function*
+
+* bt_metap(relname text) returns record
+
+b 트리 인덱스의 메타페이지에 대한 정보를 반환합니다.
+
+예) 
+[source, sql]
+----
+SELECT * FROM bt_metap('pg_cast_oid_index');
+-[ RECORD 1 ]-------------+-------
+magic                     | 340322
+version                   | 4
+root                      | 1
+level                     | 0
+fastroot                  | 1
+fastlevel                 | 0
+last_cleanup_num_delpages | 0
+last_cleanup_num_tuples   | 230
+allequalimage             | f
+----
+
+* bt_page_stats(relname text, blkno bigint) returns record
+
+b 트리 인덱스의 단일페이지에 대한 요약 정보를 반환합니다.
+
+예)
+[source, sql]
+----
+SELECT * FROM bt_page_stats('pg_cast_oid_index', 1);
+-[ RECORD 1 ]-+-----
+blkno         | 1
+type          | l
+live_items    | 224
+dead_items    | 0
+avg_item_size | 16
+page_size     | 8192
+free_size     | 3668
+btpo_prev     | 0
+btpo_next     | 0
+btpo_level    | 0
+btpo_flags    | 3
+----
+
+* bt_page_items(relname text, blkno bigint) returns setof record
+
+b 트리 인덱스 페이지의 모든 항목에 대한 자세한 정보를 반환합니다.
+
+예)
+[source, sql]
+----
+SELECT itemoffset, ctid, itemlen, nulls, vars, data, dead, htid, tids[0:2] AS some_tids
+        FROM bt_page_items('tenk2_hundred', 5);
+ itemoffset |   ctid    | itemlen | nulls | vars |          data           | dead |  htid  |      some_tids
+------------+-----------+---------+-------+------+-------------------------+------+--------+---------------------
+          1 | (16,1)    |      16 | f     | f    | 30 00 00 00 00 00 00 00 |      |        |
+          2 | (16,8292) |     616 | f     | f    | 24 00 00 00 00 00 00 00 | f    | (1,6)  | {"(1,6)","(10,22)"}
+          3 | (16,8292) |     616 | f     | f    | 25 00 00 00 00 00 00 00 | f    | (1,18) | {"(1,18)","(4,22)"}
+          4 | (16,8292) |     616 | f     | f    | 26 00 00 00 00 00 00 00 | f    | (4,18) | {"(4,18)","(6,17)"}
+          5 | (16,8292) |     616 | f     | f    | 27 00 00 00 00 00 00 00 | f    | (1,2)  | {"(1,2)","(1,19)"}
+          6 | (16,8292) |     616 | f     | f    | 28 00 00 00 00 00 00 00 | f    | (2,24) | {"(2,24)","(4,11)"}
+          7 | (16,8292) |     616 | f     | f    | 29 00 00 00 00 00 00 00 | f    | (2,17) | {"(2,17)","(11,2)"}
+          8 | (16,8292) |     616 | f     | f    | 2a 00 00 00 00 00 00 00 | f    | (0,25) | {"(0,25)","(3,20)"}
+          9 | (16,8292) |     616 | f     | f    | 2b 00 00 00 00 00 00 00 | f    | (0,10) | {"(0,10)","(0,14)"}
+         10 | (16,8292) |     616 | f     | f    | 2c 00 00 00 00 00 00 00 | f    | (1,3)  | {"(1,3)","(3,9)"}
+         11 | (16,8292) |     616 | f     | f    | 2d 00 00 00 00 00 00 00 | f    | (6,28) | {"(6,28)","(11,1)"}
+         12 | (16,8292) |     616 | f     | f    | 2e 00 00 00 00 00 00 00 | f    | (0,27) | {"(0,27)","(1,13)"}
+         13 | (16,8292) |     616 | f     | f    | 2f 00 00 00 00 00 00 00 | f    | (4,17) | {"(4,17)","(4,21)"}
+(13 rows)
+----
+
+* bt_page_items(page bytea) returns setof record
+
+페이지를 bytea 값으로 전달할 수 있습니다.
+
+예)
+[source, sql]
+----
+SELECT itemoffset, ctid, itemlen, nulls, vars, data, dead, htid, tids[0:2] AS some_tids
+        FROM bt_page_items(get_raw_page('tenk2_hundred', 5));
+ itemoffset |   ctid    | itemlen | nulls | vars |          data           | dead |  htid  |      some_tids
+------------+-----------+---------+-------+------+-------------------------+------+--------+---------------------
+          1 | (16,1)    |      16 | f     | f    | 30 00 00 00 00 00 00 00 |      |        |
+          2 | (16,8292) |     616 | f     | f    | 24 00 00 00 00 00 00 00 | f    | (1,6)  | {"(1,6)","(10,22)"}
+          3 | (16,8292) |     616 | f     | f    | 25 00 00 00 00 00 00 00 | f    | (1,18) | {"(1,18)","(4,22)"}
+          4 | (16,8292) |     616 | f     | f    | 26 00 00 00 00 00 00 00 | f    | (4,18) | {"(4,18)","(6,17)"}
+          5 | (16,8292) |     616 | f     | f    | 27 00 00 00 00 00 00 00 | f    | (1,2)  | {"(1,2)","(1,19)"}
+          6 | (16,8292) |     616 | f     | f    | 28 00 00 00 00 00 00 00 | f    | (2,24) | {"(2,24)","(4,11)"}
+          7 | (16,8292) |     616 | f     | f    | 29 00 00 00 00 00 00 00 | f    | (2,17) | {"(2,17)","(11,2)"}
+          8 | (16,8292) |     616 | f     | f    | 2a 00 00 00 00 00 00 00 | f    | (0,25) | {"(0,25)","(3,20)"}
+          9 | (16,8292) |     616 | f     | f    | 2b 00 00 00 00 00 00 00 | f    | (0,10) | {"(0,10)","(0,14)"}
+         10 | (16,8292) |     616 | f     | f    | 2c 00 00 00 00 00 00 00 | f    | (1,3)  | {"(1,3)","(3,9)"}
+         11 | (16,8292) |     616 | f     | f    | 2d 00 00 00 00 00 00 00 | f    | (6,28) | {"(6,28)","(11,1)"}
+         12 | (16,8292) |     616 | f     | f    | 2e 00 00 00 00 00 00 00 | f    | (0,27) | {"(0,27)","(1,13)"}
+         13 | (16,8292) |     616 | f     | f    | 2f 00 00 00 00 00 00 00 | f    | (4,17) | {"(4,17)","(4,21)"}
+(13 rows)
+----
+
+*brin function*
+
+* brin_page_type(page bytea) returns text
+
+주어진 brin 인덱스 페이지의 페이지 유형을 반환하거나 페이지가 유효한 brin 페이지가 아니면 오류를 출력합니다.
+
+예)
+[source, sql]
+----
+SELECT brin_page_type(get_raw_page('brinidx', 0));
+ brin_page_type 
+----------------
+ meta
+----
+
+* brin_metapage_info(page bytea) returns record
+
+brin 인덱스 메타페이지에 대한 다양한 정보를 반환합니다.
+
+예)
+[source, sql]
+----
+SELECT * FROM brin_metapage_info(get_raw_page('brinidx', 0));
+   magic    | version | pagesperrange | lastrevmappage 
+------------+---------+---------------+----------------
+ 0xA8109CFA |       1 |             4 |              2
+----
+
+* brin_revmap_data(page bytea) returns setof tid
+
+brin 인덱스 범위 맵 페이지의 튜플 식별자 목록을 반환합니다.
+
+예)
+[source, sql]
+----
+SELECT * FROM brin_revmap_data(get_raw_page('brinidx', 2)) LIMIT 5;
+  pages  
+---------
+ (6,137)
+ (6,138)
+ (6,139)
+ (6,140)
+ (6,141)
+----
+
+* brin_page_items(page bytea, index oid) returns setof record
+
+brin 데이터 페이지에 저장된 데이터를 반환합니다.
+
+예)
+[source, sql]
+----
+SELECT * FROM brin_page_items(get_raw_page('brinidx', 5),
+                                     'brinidx')
+       ORDER BY blknum, attnum LIMIT 6;
+ itemoffset | blknum | attnum | allnulls | hasnulls | placeholder |    value     
+------------+--------+--------+----------+----------+-------------+--------------
+        137 |      0 |      1 | t        | f        | f           | 
+        137 |      0 |      2 | f        | f        | f           | {1 .. 88}
+        138 |      4 |      1 | t        | f        | f           | 
+        138 |      4 |      2 | f        | f        | f           | {89 .. 176}
+        139 |      8 |      1 | t        | f        | f           | 
+        139 |      8 |      2 | f        | f        | f           | {177 .. 264}
+----
+
+*gin function*
+
+* gin_metapage_info(page bytea) returns record
+
+GIN 인덱스 메타페이지에 대한 정보를 반환합니다.
+
+예)
+[source, sql]
+----
+SELECT * FROM gin_metapage_info(get_raw_page('gin_index', 0));
+-[ RECORD 1 ]----+-----------
+pending_head     | 4294967295
+pending_tail     | 4294967295
+tail_free_size   | 0
+n_pending_pages  | 0
+n_pending_tuples | 0
+n_total_pages    | 7
+n_entry_pages    | 6
+n_data_pages     | 0
+n_entries        | 693
+version          | 2
+----
+
+* gin_page_opaque_info(page bytea) returns record
+
+페이지 유형과 같은 GIN 인덱스 불투명 영역에 대한 정보를 반환합니다.
+
+예)
+[source, sql]
+----
+SELECT * FROM gin_page_opaque_info(get_raw_page('gin_index', 2));
+ rightlink | maxoff |         flags
+-----------+--------+------------------------
+         5 |      0 | {data,leaf,compressed}
+(1 row)
+----
+
+* gin_leafpage_items(page bytea) returns setof record
+
+GIN 리프 페이지에 저장된 데이터에 대한 정보를 반환합니다.
+
+예)
+[source, sql]
+----
+SELECT first_tid, nbytes, tids[0:5] AS some_tids
+        FROM gin_leafpage_items(get_raw_page('gin_test_idx', 2));
+ first_tid | nbytes |                        some_tids
+-----------+--------+----------------------------------------------------------
+ (8,41)    |    244 | {"(8,41)","(8,43)","(8,44)","(8,45)","(8,46)"}
+ (10,45)   |    248 | {"(10,45)","(10,46)","(10,47)","(10,48)","(10,49)"}
+ (12,52)   |    248 | {"(12,52)","(12,53)","(12,54)","(12,55)","(12,56)"}
+ (14,59)   |    320 | {"(14,59)","(14,60)","(14,61)","(14,62)","(14,63)"}
+ (167,16)  |    376 | {"(167,16)","(167,17)","(167,18)","(167,19)","(167,20)"}
+ (170,30)  |    376 | {"(170,30)","(170,31)","(170,32)","(170,33)","(170,34)"}
+ (173,44)  |    197 | {"(173,44)","(173,45)","(173,46)","(173,47)","(173,48)"}
+(7 rows)
+----
+
+*gist function*
+
+* gist_page_opaque_info(page bytea) returns record
+
+NSN, rightlink 및 페이지 유형과 같은 GiST 인덱스 페이지의 불투명 영역에서 정보를 반환합니다.
+
+예)
+[source, sql]
+----
+SELECT * FROM gist_page_opaque_info(get_raw_page('test_gist_idx', 2));
+ lsn | nsn | rightlink | flags  
+-----+-----+-----------+--------
+ 0/1 | 0/0 |         1 | {leaf}
+(1 row)
+----
+
+* gist_page_items(page bytea, index_oid regclass) returns setof record
+
+GiST 인덱스의 페이지에 저장된 데이터에 대한 정보를 반환합니다.
+
+예)
+[source, sql]
+----
+SELECT * FROM gist_page_items(get_raw_page('test_gist_idx', 0), 'test_gist_idx');
+ itemoffset |   ctid    | itemlen | dead |       keys        
+------------+-----------+---------+------+-------------------
+          1 | (1,65535) |      40 | f    | (p)=((166,166))
+          2 | (2,65535) |      40 | f    | (p)=((332,332))
+          3 | (3,65535) |      40 | f    | (p)=((498,498))
+          4 | (4,65535) |      40 | f    | (p)=((664,664))
+          5 | (5,65535) |      40 | f    | (p)=((830,830))
+          6 | (6,65535) |      40 | f    | (p)=((996,996))
+          7 | (7,65535) |      40 | f    | (p)=((1000,1000))
+(7 rows)
+----
+
+* gist_page_items_bytea(page bytea) returns setof record
+
+gist_page_items와 같지만 키 데이터를 raw bytea blob으로 반환합니다. 키 디코딩을 시도하지 않기 때문에 어떤 인덱스가 관련되어 있는지 알 필요가 없습니다.
+
+예)
+[source,sql]
+----
+SELECT * FROM gist_page_items_bytea(get_raw_page('test_gist_idx', 0));
+ itemoffset |   ctid    | itemlen | dead |                                      key_data                                      
+------------+-----------+---------+------+-----------------------------------------​-------------------------------------------
+          1 | (1,65535) |      40 | f    | \x00000100ffff28000000000000c0644000000000​00c06440000000000000f03f000000000000f03f
+          2 | (2,65535) |      40 | f    | \x00000200ffff28000000000000c0744000000000​00c074400000000000e064400000000000e06440
+          3 | (3,65535) |      40 | f    | \x00000300ffff28000000000000207f4000000000​00207f400000000000d074400000000000d07440
+          4 | (4,65535) |      40 | f    | \x00000400ffff28000000000000c0844000000000​00c084400000000000307f400000000000307f40
+          5 | (5,65535) |      40 | f    | \x00000500ffff28000000000000f0894000000000​00f089400000000000c884400000000000c88440
+          6 | (6,65535) |      40 | f    | \x00000600ffff28000000000000208f4000000000​00208f400000000000f889400000000000f88940
+          7 | (7,65535) |      40 | f    | \x00000700ffff28000000000000408f4000000000​00408f400000000000288f400000000000288f40
+(7 rows)
+----
+
+*hash function*
+
+* hash_page_type(page bytea) returns text
+
+주어진 hash 인덱스 페이지의 페이지 유형을 반환합니다.
+
+예)
+[source, sql]
+----
+SELECT hash_page_type(get_raw_page('con_hash_index', 0));
+ hash_page_type 
+----------------
+ metapage
+----
+
+* hash_page_stats(page bytea) returns setof record
+
+hash 인덱스의 버킷 또는 오버플로 페이지에 대한 정보를 반환합니다.
+
+예)
+[source, sql]
+----
+SELECT * FROM hash_page_stats(get_raw_page('con_hash_index', 1));
+-[ RECORD 1 ]---+-----------
+live_items      | 407
+dead_items      | 0
+page_size       | 8192
+free_size       | 8
+hasho_prevblkno | 4096
+hasho_nextblkno | 8474
+hasho_bucket    | 0
+hasho_flag      | 66
+hasho_page_id   | 65408
+----
+
+* hash_page_items(page bytea) returns setof record
+
+hash 인덱스 페이지의 버킷 또는 오버플로 페이지에 저장된 데이터에 대한 정보를 반환합니다.
+
+예)
+[source,sql]
+----
+SELECT * FROM hash_page_items(get_raw_page('con_hash_index', 1)) LIMIT 5;
+ itemoffset |   ctid    |    data    
+------------+-----------+------------
+          1 | (899,77)  | 1053474816
+          2 | (897,29)  | 1053474816
+          3 | (894,207) | 1053474816
+          4 | (892,159) | 1053474816
+          5 | (890,111) | 1053474816
+----
+
+* hash_bitmap_info(index oid, blkno bigint) returns record
+
+hash 인덱스의 특정 오버플로 페이지에 대한 비트맵 페이지의 비트 상태를 보여줍니다.
+
+예)
+[source,sql]
+----
+SELECT * FROM hash_bitmap_info('con_hash_index', 2052);
+ bitmapblkno | bitmapbit | bitstatus 
+-------------+-----------+-----------
+          65 |         3 | t
+----
+
+* hash_metapage_info(page bytea) returns record
+
+hash 인덱스의 메타 페이지에 저장된 정보를 반환합니다.
+
+예)
+[source, sql]
+----
+SELECT magic, version, ntuples, ffactor, bsize, bmsize, bmshift, maxbucket, highmask, lowmask, ovflpoint, firstfree, nmaps, procid, regexp_replace(spares::text, '(,0)*}', '}') as spares, regexp_replace(mapp::text, '(,0)*}', '}') as mapp
+FROM hash_metapage_info(get_raw_page('con_hash_index', 0));
+-[ RECORD 1 ]-------------------------------------------------​------------------------------
+magic     | 105121344
+version   | 4
+ntuples   | 500500
+ffactor   | 40
+bsize     | 8152
+bmsize    | 4096
+bmshift   | 15
+maxbucket | 12512
+highmask  | 16383
+lowmask   | 8191
+ovflpoint | 28
+firstfree | 1204
+nmaps     | 1
+procid    | 450
+spares    | {0,0,0,0,0,0,1,1,1,1,1,1,1,1,3,4,4,4,45,55,58,59,​508,567,628,704,1193,1202,1204}
+mapp      | {65}
+----
+
+
+
+== pageinspect 예시
+설명 중 예시에서 추가 보충이 필요한 부분에 대해 볼 수 있는 소스를 공유합니다.
+
+get_raw_page에서 PageHeaderData 구조체 내용에 대한 설명 +
+*src/include/storage/bufpage.h*
+
+FSM page 구조체 정보 +
+*src/backend/storage/freespace/README*
+
+heap function 자세한 내용 보충 +
+*src/include/storage/itemid.h*
+
+*src/include/access/htup_details.h*
+
+*src/include/access/htup_details.h*

@@ -1,0 +1,49 @@
+= intagg
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== intagg 설명
+intagg 모듈은 정수 집계자와 열거자를 제공합니다. 이 함수의 상위 집합을 제공하는 내장 함수가 있기 때문에 지금은 사용되지 않으나, 내장 함수에 대한 호환성 wrapper로 제공됩니다.
+
+집계자는 int_array_aggregate(integer) 함수를 제공하며 정수를 정확히 포함하는 정수 배열을 생성합니다. 모든 배열 유형에 대해 동일한 작업을 수행하는 wrapper 입니다.
+
+열거자는 int_array_enum(integer[]) returns set of integer 형식으로, 집계기의 역 작업입니다. 정수 배열이 주어지면 행 집합으로 확장합니다. 모든 unnest 배열 유형에 대해 동일한 작업을 수행하는 wrapper 입니다.
+
+== intagg 예시
+집계자, 열거자 함수를 사용하는 예시입니다.
+[source, sql]
+----
+--일대 다 테이블의 예
+CREATE TABLE left (id INT PRIMARY KEY, ...);
+CREATE TABLE right (id INT PRIMARY KEY, ...);
+CREATE TABLE one_to_many(left INT REFERENCES left, right INT REFERENCES right);
+
+--left 테이블의 항목에 대해 right 테이블의 모든 항목이 반환. 일반적인 구성
+SELECT right.* from right JOIN one_to_many ON (right.id = one_to_many.right)
+  WHERE one_to_many.left = item;
+
+
+--테이블 항목의 수가 많아 번거로워, 집계기 함수를 사용해 예시와 같이 테이블 생성가능
+--왼쪽 항목당 하나의 행과 오른쪽 항목 배열이 있는 테이블
+CREATE TABLE summary AS
+  SELECT left, int_array_aggregate(right) AS right
+  FROM one_to_many
+  GROUP BY left;
+
+--위 테이블을 보충하기 위해 열거자 함수 사용
+SELECT left, int_array_enum(right) FROM summary WHERE left = item;
+
+--위 함수의 결과는 아래와 같음
+SELECT left, right FROM one_to_many WHERE left = item;
+
+--종합하여 one_to_many테이블과 조인 대신 다음과 같이 대체 가능
+SELECT right, count(right) FROM
+  ( SELECT left, int_array_enum(right) AS right
+    FROM summary JOIN (SELECT left FROM left_table WHERE left = item) AS lefts
+         ON (summary.left = lefts.left)
+  ) AS list
+  GROUP BY right
+  ORDER BY count DESC;
+----

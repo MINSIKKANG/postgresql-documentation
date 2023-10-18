@@ -1,0 +1,76 @@
+= Alpine Docker
+:toc:
+:toc-title:
+:table-caption!:
+:sectnums:
+
+- alpine dockerhub 공식 이미지 : https://hub.docker.com/_/alpine
+
+[%header, cols="3,7"]
+|=========================
+|image 버전 | tag
+|edge       | 20220328, edge
+|3.16       | 3.16.0, 3.16, 3_latest
+|3.15       | 3.15.4, 3.15
+|3.14       | 3.14.6, 3.14
+|3.13       | 3.13.10, 3.13
+|=========================
+
+== 개요
+Alpine은 리눅스 기반이며 MIT Licencse 입니다. 다른 리눅스에 비해 가벼운 것이 장점이기 때문에 Docker Container Image로 사용되는 경우가 많습니다. musl libc와 BusyBox를 기반으로 구축된 리눅스이며 Docker Image로는 5MB 수준으로 다른 BusyBox기반의 Linux보다 매우 가볍습니다.
+
+=== BusyBox
+조그만 상자안에 standard utilities 들을 담아 놓은 일종의 명령어, 바이너리들의 모음집 같은 것입니다. 특정한 Application을 이용하는 것보다 네트워크 서버, 임베디드, Docker image 등으로 사용합니다.
+
+=== APK
+apk는 Alpine linux에서 사용하는 패키지 관리자입니다.
+
+|==================
+|apk update | 패키지 저장소 목록 업데이트
+|apk upgrade | 패키지 저장소 업그레이드
+|apk search <패키지명>  | 패키지 저장소 목록에서 패키지를 검색
+|apk add <패키지[=버전]> | 특정 패키지를 설치
+|apk del <패키지> | 특정 패키지를 제거
+|apk info | 설치된 모든 패키지를 나열
+|apk list | apk 관리자가 바라보고 있는 저장소에 있는 패키지 리스트
+|==================
+
+- package 목록 : https://pkgs.alpinelinux.org/packages
+- 실제 패키지 저장소 +
+ `/etc/apk/repositories` 에서 확인할 수 있습니다.
+ * https://dl-cdn.alpinelinux.org/alpine/v3.16/main
+ * https://dl-cdn.alpinelinux.org/alpine/v3.16/community
+
+
+== Alpine Linux 설치
+
+- Docker Image 가져오기 +
+-----
+docker pull alpine
+# docker pull alpine:<tag>
+-----
+
+- Dockerfile로의 사용 +
+-----
+FROM alpine:3.16
+RUN apk add postgresql14
+-----
+
+- Dockerfile Build +
+[source, Docker]
+-----
+docker build -t hypersql-postgres:v0.1 .
+-----
+
+- Docker 이미지 실행 +
+-----
+docker run -d -it --name hypersql-postgres hypersql-postgres:v0.1 /bin/sh
+-----
+
+- Container 실행 +
+-----
+docker exec -it test /bin/sh
+-----
+
+== 패키지 저장소
+alpine linux의 경우에는 패키지를 관리하는 저장소가 있습니다. https://pkgs.alpinelinux.org/packages 에서 원하는 Alpine 버전의 패키지를 검색할 수 있습니다.

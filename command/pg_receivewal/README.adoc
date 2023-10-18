@@ -1,0 +1,89 @@
+= pg_receivewal
+:toc: 
+:toc-title: 목차
+:sectlinks:
+
+== 1. pg_receivewal 개요
+- PostgreSQL 서버로 부터 WAL 파일을 스트리밍 해줄 수 있는 도구이다.
+- 공식 문서 참고 : https://www.postgresql.org/docs/14/app-pgreceivewal.html
+
+== 2. pg_receivewal 옵션
+=== 실행 시놉시스
+----
+pg_receivewal [option...]
+----
+
+=== 옵션
+- `-D directory` or `--directory=directory` +
+스트리밍 결과 파일을 저장할 디렉토리를 지정합니다. + 
+*필수 파라미터* 입니다.
+
+- `-E lsn` or `--endpos=lsn` + 
+최대로 스트리밍할 LSN 위치를 지정합니다. 설정한 위치까지 스트리밍이 완료되면, pg_receivewal이 정상 종료 코드(0)를 반환하며 종료됩니다.
+- `--if-not-exists` +
+--create-slot 옵션을 주었을 때, 해당 이름을 가진 슬롯이 이미 있을 경우에 에러가 발생하지 않도록 합니다.
+
+- `-n` or `--no-loop` +
+연결에 실패했을 경우, 에러를 발생하며 종료되고 연결을 재시도하지 않습니다.
+
+- `--no-sync` +
+pg_receivewal이 WAL 데이터를 디스크에 강제로 flush 하지 않도록 합니다. 속도가 빨라지지만, 운영체제의 동작으로 인해서 WAL segement가 손상될 수 있습니다. + 
+반대되는 옵션으로는 `--synchronous` 입니다.
+
+- `--synchronous` + 
+WAL 데이터를 받는 즉시 디스크에 flush 합니다. flushing이 끝나면 스트리밍 서버에 결과 패킷을 전송합니다.
+
+- `-s interval` or `--status-interval=interval` +
+서버로 다시 전송되는 상태 패킷 사이의 시간(초)을 지정합니다. 이를 통해 서버에서 진행 상황을 더 쉽게 모니터링할 수 있습니다. 
+값이 0이면 주기적 상태 업데이트가 완전히 비활성화되지만 시간 초과 연결 해제를 방지하기 위해 서버에서 요청할 때 업데이트가 계속 전송됩니다. + 
+기본값은 10초입니다.
+
+- `-s slotname` or `--slot=slotname` +
+기존 복제 슬롯을 사용하려면 pg_receivewal이 필요합니다(섹션 27.2.6 참조). 
+이 옵션을 사용하면 pg_receivewal은 각 세그먼트가 디스크에 동기화된 시간을 나타내는 flush 위치를 서버에 보고하여 서버가 필요하지 않은 경우 해당 세그먼트를 제거할 수 있습니다.
+
+- `--role=rolename` +
+dump를 수행할 User의 Role을 설정합니다. pg_dump가 데이터베이스에 연결한 후에 명령을 실행하도록 설정됩니다. 만약 `-U` 로 설정된 User에 pg_dump를 실행할 권한이 없을 때 유용합니다.
+
+- `--role=rolename` +
+dump를 수행할 User의 Role을 설정합니다. pg_dump가 데이터베이스에 연결한 후에 명령을 실행하도록 설정됩니다. 만약 `-U` 로 설정된 User에 pg_dump를 실행할 권한이 없을 때 유용합니다.
+
+- `v` or `--verbose` +
+진행 상황을 출력합니다.
+
+- `z level` or `--compress=level` +
+gzip을 이용해 압축하며, 압축 레벨을 설정합니다. 레벨은 0부터 9까지 있으며 레벨이 높을 수록 높은 압축률을 가집니다.
+
+- `-d dbname` or `--dbname=dbname` +
+데이터베이스의 이름을 지정합니다. dbname은 해당 옵션이 아니라도 첫번째 인자로 값을 주는 것과 동일합니다.
+
+- `-h host` or `--host=host` +
+호스트를 지정합니다. 값이 슬래시로 시작하면 Unix 도메인 소켓의 디렉토리로 사용합니다. Default 값은 PGHOST 환경변수에서 가져오며, 환경변수가 없다면 Unix 도메인 소켓 연결을 시도합니다.
+
+- `-p port` or `--port=port` +
+포트번호를 지정합니다.
+
+- `-U username` or `--username=username` +
+연결할 User name 입니다.
+
+- `-w` or `--no-password` +
+데이터베이스를 연결하기 전에 password 없이 명령어를 실행합니다. 해당 명령이 실행될 때 암호가 필요없다면(.pgpass) 바로 실행됩니다.
+
+- `-W` or `--password` +
+데이터베이스를 연결하기 전에 password를 물어봅니다.
+
+- `--create-slot` +
+Physical replication slot을 생성합니다. 생성할 슬롯명은 `--slot name` 명령어를 이용해 지정할 수 있습니다.
+
+- `--drop-slot` +
+Physical replication slot을 삭제합니다. 삭제할 슬롯명은 `--slot name` 명령어를 이용해 지정할 수 있습니다.
+
+- `-V` or `--version` +
+바이너리 버전을 출력합니다.
+
+- `-?` or `--help` + 
+pg_receive_wal 커맨드 설명서를 출력합니다.
+
+== 3. 예제
+`pg_receivewal -h 172.27.0.167 -d postgres -D /hypersql/backup/pgbackrest/streaming/pg1/`
+

@@ -1,0 +1,97 @@
+= dblink
+:toc:
+:toc-title:
+:table-caption!:
+:sectnums:
+
+dblink 홈페이지 : https://www.postgresql.org/docs/current/contrib-dblink-function.html +
+git 주소 : https://github.com/postgres/postgres/blob/master/contrib/dblink/sql/dblink.sql +
+
+== dblink 란?
+
+현재 데이터베이스 세션 내에서 물리적으로 다른 곳에 위치한 데이터베이스 연결을 지원하는 확장성 모듈 +
+extension 설치 후 사용자 설정에 맞춰 사용하고 삭제하지 않는 이상 재설치는 불가 +
+스키마 지정이 없으면 defualt로 public에 설치가 되므로 스키마별로 사용이 필요한 경우 ALTER로 변경하거나 삭제 후 재설치하여 사용 +
+
+
+== 설치 요구사항 및 설명
+
+* 설치 요구사항 +
+
+** PostgreSQL contrib 에 포함되어 있는 Extension +
+따로 설치 요구사항이 필요하지 않음
+
+* 설명 +
+
+EXTENSION 사용 방법 
+----
+CREATE EXTENSION [ IF NOT EXISTS ]  extension_name
+    [WITH]  [SCHEMA schema_name]
+    		[VERSION version]
+           	[FROM old_version]
+----
+
+예시) +
+CREATE EXTENSION IF NOT EXISTS dblink SCHEMA public --(1) +
+ALTER EXTENSION SCHEMA db2 --(2) +
+DROP EXTENSION dblink --(3) +
+(1) 스키마를 지정하지 않을 경우 default 스키마(public)에 설치됨 +
+ - IF NOT EXISTS는 해당 DB에 EXTENSION이 없을 경우에만 설치. +
+ - 해당 명령어가 없는데 이미 설치가 되어 있으면 에러 뜸. +
+(2) 설치된 EXTENSION을 다른 스키마로 이동 +
+(3) DB LINK 삭제 
+
+DBLINK 사용 방법
+----
+SELECT dblink_connect('[id]', 
+                     'hostaddr = [adress] 
+                      user = [user] 
+                      password = [password] 
+                      dbname = [db_name] 
+                      port = [port]')
+----
+- id : dblink 사용을 위한 link명
+- adress : 연결할 원격 디비의 host 주소
+- user : 연결할 원격 디비의 user
+- password : 연결할 원격 디비유저의 비밀번호
+- db_name : 연결할 원격 디비명 - port : 연결할 원격디비의 포트번호
+
+----
+SELECT [result_name].* FROM dblink('[dblink_name]', '[query]') AS [result_name] ([schema])
+----
+
+- result_name : 원격디비에 날린 쿼리 결과에 대한 임의의 이름
+- dblink_name : 위에서 정의한 DB LINK명
+- query : 원격디비에 날릴 쿼리
+- schema : 원격디비에 접근하여 쿼리를 날릴 스키마
+
+
+
+* 주의사항 +
+
+. SELECT dblink에서 SQL을 수행한 후 ' AS EX(필드명1 필드타입1, 필드명2 필드타입2 ...... ) ' 으로 SELECT 에서 반환되어 표시할 컬럼의 필드타입을 지정해주어야함.
+. dblink 사용을 위해 주체가 되는 디비 유저가 superuser 권한을 가지고 있어햐 함
+. extension은 1개 DB당 1개의 LINK만 설치되므로 다른 스키마에서 사용하기 위해서는 EXTENSION 을 전부 ALTER 해야함.
+
+
+== 설치 및 테스트
+
+CREATE EXTENSION
+----
+$ psql -U postgres 
+$ CREATE EXTENSION DBLINK ; 
+$ ALTER EXTENSION db_link SCHEMA test; 
+----
+
+DBLINK 사용 
+----
+$ SELECT db_link_connect('postgres', 'hostaddr=192.168.0.10 user=postgres password=1234 dbname=test port=5432')
+$ SELECT * FROM db_link('postgres', 'SELECT * FROM test_table' AS name (name character varying(5), etc character varying(20)));
+--원격 DB에 존재하는 test_table 리스트 전체 출력
+$ SELECT * FROM (db_link('postgres', 'SELECT * FROM test_table') AS name (name character varying(5), etc character varying(20))) AS remote_table, table2
+--원격DB에 존재하는 test_table을 remote_table이라는 이름으로 별칭을 부여한 후, 기존 db의 table2 테이블과 join
+$ SELECT db_link DISCONNECT('postgres')
+-- 연결한 원격 db 종료
+----
+
+

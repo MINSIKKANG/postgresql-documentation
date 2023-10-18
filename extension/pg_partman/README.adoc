@@ -1,0 +1,223 @@
+= pg_partman extention
+:toc:
+:toc-title:
+
+== pg_partman 이란?
+
+참고 자료 : https://github.com/pgpartman/pg_partman
+
+pg_partman 은 time 또는 serial id 기반 Table Partitioing 을 보다 쉽게 관리하는데 도움을 주는 Extension 입니다.
+
+옵션이 상당히 많지만 일반적으로 몇 가지만 필요하므로 직접 파티션 구성을 하는 것보다 훨씬 쉽습니다.
+
+각 파티션을 수동으로 생성하지 않고 다음 설정으로 pg_partman을 구성합니다.
+----
+분할할 테이블
+파티션 타입
+파티션 키
+파티션 세분성
+파티션 사전 생성 및 관리 옵션
+----
+
+PostgreSQL 10 의 기본 파티셔닝은 pg_partman v3.0.1 부터 지원되며
+
+PostgreSQL 11 과 함께 v4.0.0 부터 더 광범위하게 지원됩니다.
+
+자식 테이블 생성은 모두 extention 에서 관리합니다.
+
+native 가 아닌 경우 트리거 기능 유지 관리도 처리됩니다. 
+
+non-native 파티셔닝의 경우 기존 데이터가 있는 테이블의 데이터를 쉽게 관리할 수 있는 더 작은 배치로 분할할 수 있습니다. 
+
+native 파티셔닝의 경우 먼저 분할된 새 상위 항목을 생성하고 설정이 완료된 후 데이터를 마이그레이션해야 합니다.
+
+native 및 non-native 파티셔닝에 대해 더 이상 필요하지 않은 파티션을 자동으로 삭제할 수 있습니다.
+
+백그라운드 작업자(BGW) 프로세스가 포함되어 대부분의 경우 외부 스케줄러(cron 등) 없이 파티션 유지 관리를 자동으로 실행합니다.
+
+== pg_partman install
+
+*PostgreSQL v10 이상*
+
+=== 소스 코드 설치
+
+소스 다운 참고 사이트 : https://github.com/pgpartman/pg_partman
+
+----
+소스 파일 다운로드 후
+
+pg_partman 폴더에서 make install 수행
+----
+
+=== YUM 설치
+
+1.PostgreSQL 버전에 맞는 pg_partman 패키지 설치
+
+----
+sudo yum install pg_partman_14.x86_64
+----
+
+2.postgresql.conf 파일에 라이브러리 추가
+
+* 라이브러리 추가시 서버 재시작 필요
+----
+shared_preload_libraries = 'pg_partman_bgw'     # (change requires restart)
+----
+
+2-1. postgresql.conf 파일에서 BGW에 대한 다른 파라미터도 설정할 수 있습니다. dbname 은 지정된 데이터베이스에서 유지 관리를 실행하기 위해 최소한 필요합니다. 이것은 Reload 로 언제든 추가/변경이 가능합니다.
+
+PostgreSQL 9.4 에서 사용자 정의 Background Worker 를 생성하고 런타임 중에 동적으로 로드하는 기능이 도입 되었습니다.
+pg_partman의 BGW 는 기본적으로 run_maintenance() 함수를 실행하는 스케줄러입니다.
+----
+ex)
+pg_partman_bgw.interval = 3600
+pg_partman_bgw.role = 'keith'
+pg_partman_bgw.dbname = 'keith'
+----
+
+* `pg_partman_bgw.dbname(필수 파라미터)`
+    ** run_maintenance()가 실행될 데이터베이스. 둘 이상인 경우 쉼표로 구분
+    ** 미설정 시 BGW 는 아무 작업도 수행하지 않음
+* `pg_partman_bgw.interval`
+    ** run_maintenance() 호출 간격 시간(초)입니다.
+    ** 기본값은 3600(1시간) 입니다.
+* `pg_partman_bgw.role` 
+    ** run_maintenance() 가 실행될 ROLE 입니다.
+    ** 기본값은 postgres 입니다.
+    ** 하나의 ROLE 만 허용됩니다.
+* `pg_partman_bgw.analyze`
+    ** run_maintenance()에 대한 p_analyze 인수와 같은 목적입니다.
+    ** TRUE의 경우 'on'으로 설정합니다(PG10 및 이전 버전의 경우 기본값).
+    ** FALSE의 경우 'off'로 설정합니다(PG11+의 경우 기본값).
+    ** 기본적으로 새 하위 테이블이 생성될 때마다 제약 조건 제외가 작동하는지 확인하기 위해 파티션 세트의 상위 테이블에서 분석이 실행됩니다. 이 분석은 false로 설정하여 건너뛸 수 있으며 많은 양의 데이터를 이동하는 속도를 높이는 데 도움이 됩니다. false로 설정된 경우 통계가 제대로 업데이트되었는지 확인하기 위해 완료 시 파티션 세트를 수동으로 분석하는 것이 좋습니다.
+* `pg_partman_bgw.jobmon`
+    ** run_maintenance()에 대한 p_jobmon 인수와 같은 목적입니다.
+    ** TRUE의 경우 'on'으로 설정합니다.
+    ** FALSE의 경우 'off'으로 설정합니다.
+    **pg_partman이 pg_jobmon Extension을 사용하여 파티셔닝이 올바르게 작동하는지 모니터링하도록 허용합니다. 
+    **기본값은 TRUE 입니다.
+
+
+*어떤 이유던 Main Background Worker Process 가 충돌하는 경우 10분 마다 다시 시작하도록 설정됩니다.*
+*프로세스 충돌 발생 시 Postgres 로그에서 문제를 확인하십시오.*
+
+3.PostgreSQL 재기동 및 Extension 생성
+----
+pg_ctl restart
+
+CREATE SCHEMA partman;
+CREATE EXTENSION pg_partman SCHEMA partman;
+----
+버전 4.1.0부터 pg_partman은 더 이상 native partitioning을 위해 Superuser를 실행할 필요가 없습니다. 
+트리거 기반 partitioning 에는 여전히 필요하므로 Superuser가 필요하지 않은 경우 native partitioning 으로 마이그레이션하는 방법을 찾으십시오. 
+
+pg_partman을 설치하려면 superuser 가 필요합니다. 
+
+pg_partman 기능을 실행하고 pg_partman 이 유지 관리하는 모든 partition 세트의 오너가 되도록 전용 ROLE 을 생성하는 것이 좋습니다. 
+
+이 ROLE 에는 최소한 다음 권한이 필요합니다. (pg_partman이 "partman" 스키마에 설치되어 있고 해당 역할이 "partman"이라고 가정).
+
+----
+CREATE ROLE partman WITH LOGIN;
+GRANT ALL ON SCHEMA partman TO partman;
+GRANT ALL ON ALL TABLES IN SCHEMA partman TO partman;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA partman TO partman;
+GRANT EXECUTE ON ALL PROCEDURES IN SCHEMA partman TO partman;  -- PG11+ only
+GRANT ALL ON SCHEMA my_partition_schema TO partman;
+GRANT TEMPORARY ON DATABASE mydb to partman; -- allow creation of temp tables to move data out of default
+----
+
+Extension 조회 시 
+
+----
+postgres=# select * from pg_available_extensions where name='pg_partman';
+    name    | default_version | installed_version |                       comment                        
+------------+-----------------+-------------------+------------------------------------------------------
+ pg_partman | 4.6.2           | 4.5.1             | Extension to manage partitioned tables by time or ID
+(1 row)
+----
+
+== pg_partman Upgrade
+
+현재 pg_partman Extension 4.5.1 가 설치되어 있습니다.
+
+----
+postgres=# select * from pg_available_extensions where name='pg_partman';
+    name    | default_version | installed_version |                       comme
+nt                        
+------------+-----------------+-------------------+------------------------------------------------------
+ pg_partman | 4.5.1           | 4.5.1             | Extension to manage partitioned tables by time or ID
+(1 row)
+----
+
+위의 install 과 같이 새로운 릴리즈 버전의 파일에서 "make install" 을 실행하여 스크립트 파일과 라이브러리를 경로에 맞게 설치합니다.
+
+다시 조회 시 default_version 이 설치한 최신 버전으로 표기됩니다.
+
+----
+postgres=# select * from pg_available_extensions where name='pg_partman';
+    name    | default_version | installed_version |                       comment                        
+------------+-----------------+-------------------+------------------------------------------------------
+ pg_partman | 4.6.2           | 4.5.1             | Extension to manage partitioned tables by time or ID
+(1 row)
+----
+
+PostgreSQL 에서 아래와 같이 수행하여 Upgrade를 수행합니다.
+
+----
+# ALTER EXTENSION pg_partman UPDATE TO '<lastest version>';
+
+postgres=# ALTER EXTENSION pg_partman UPDATE TO '4.6.2';
+ALTER EXTENSION
+
+postgres=# select * from pg_available_extensions where name='pg_partman';
+    name    | default_version | installed_version |                       comment                        
+------------+-----------------+-------------------+------------------------------------------------------
+ pg_partman | 4.6.2           | 4.6.2             | Extension to manage partitioned tables by time or ID
+(1 row)
+----
+
+아래 내용 수정 필요
+----
+만약 pg_dump / pg_restore를 수행 중이고, 이전 버전에서 pg_partman 을 업그레이드 했다면 pg_partman 의 구성 테이블을 dump 또는 retore 할때 column-inserts 옵션을 사용하는 것이 좋습니다. 
+
+이는 구성 열의 순서가 다를 수 있기 때문입니다(업그레이드는 열을 끝에 추가하기만 하고 새 설치의 기본값은 다를 수 있음).
+
+pg_partman의 주요 버전(2.x -> 3.x 등) 간에 업그레이드하는 경우 CHANGELOG에 있는 모든 중간 버전 노트, 특히 주요 버전에 대한 노트를 주의 깊게 읽으십시오. 업데이트에 대한 추가 지침(예: 트리거 기능 업데이트) 및 기타 중요한 고려 사항이 있는 경우가 많습니다.
+
+중요 참고: pg_partman에 대한 일부 업데이트는 자체 데이터베이스 오브젝트를 삭제하고 다시 만들어야 합니다. 함수/프로시저에서 PUBLIC 권한을 취소하는 경우 업데이트의 일부로 다시 생성되는 오브젝트에 다시 추가할 수 있습니다. PUBLIC 사용에 대한 제한이 pg_partman에 필요한 경우 위에 표시된 대로 자체 스키마에 설치하고 해당 스키마에 대한 원치 않는 액세스를 취소하는 것이 좋습니다. 그렇지 않으면 PUBLIC 액세스를 다시 취소하기 위해 확장 업그레이드 절차에 추가 단계를 추가해야 할 수 있습니다.
+----
+
+== pg_partman Test Example
+
+=== Simple Time Based : 1 Partition Per Day
+
+Native Partitioning 경우 원하는 유형으로 분할되도록 이미 설정된 상위 테이블로 시작해야 합니다.
+현재 pg_partman 은 RANGE 유형의 파티셔닝만 지원합니다. (시간 및 ID 에 대해). 파티셔닝되지 않은 테이블을 파티셔닝된 세트의 상위 테이블로 전환할 수 없으므로 마이그레이션이 어려울 수 있습니다.
+
+----
+CREATE SCHEMA IF NOT EXISTS partman_test;
+
+CREATE TABLE partman_test.time_taptest_table 
+    (col1 int, 
+    col2 text default 'stuff', 
+    col3 timestamptz NOT NULL DEFAULT now()) 
+PARTITION BY RANGE (col3);
+
+CREATE INDEX ON partman_test.time_taptest_table (col3);
+----
+
+Unique Index (Primary key 를 포함) 는 파티션 키를 포함하지 않는 한 기본적으로 파티션된 상위에서 생성할 수 없습니다.
+일반적으로 시간 기반 파티셔닝의 경우 각 하위 테이블에서 단일 timestamp 값만 제한하기 때문에 동작하지 않습니다.
+
+pg_partman 은 현재 Native Partitioning 에서 지원하지 않는 속성을 관리하기 위해 템플릿 테이블을 사용하여 이를 관리하는데 도움을 줍니다.
+
+아래 예시에선 create_parent()를 실행할 때 생성되는 초기 자식 테이블에 Primary key 가 있도록 템플릿 테이블을 수동 생성할 것 입니다.
+
+pg_partman에 템플릿 테이블을 제공하지 않으면 확장을 설치한 스키마에 템플릿 테이블이 생성됩니다.
+
+그러나 해당 템플릿에 추가한 속성은 해당 시점 이후에 새로 생성된 하위 테이블에만 적용됩니다.
+
+이미 존재하는 모든 하위 테이블에 수동으로 해당 속성을 소급 적용해야 합니다.
+
+*내용 추가 중*

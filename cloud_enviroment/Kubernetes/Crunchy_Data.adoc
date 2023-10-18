@@ -1,0 +1,989 @@
+= Crunchy Data PostgreSQL Operator(PGO)
+:toc:
+:toc-title:
+:table-caption!:
+:sectnums:
+
+- 참고 링크 : https://access.crunchydata.com/documentation/postgres-operator/5.1.2
+
+== 개요
+GitOps 워크플로우용으로 설계된 PGO를 사용하여 Kubernetes에서 PostgreSQL을 쉽게 사용할 수 있습니다. TLS 통신, 가용성, 재해복구 및 모니터링 등의 기능으로 PostgreSQL 클러스터를 구축할 수 있습니다.
+
+PostgreSQL Release에 대한 Pipeline을 구축과 Cluster 복제 및 롤링업데이트를 통한 가동 중지 시간을 최소화 합니다.
+
+== 지원되는 플랫폼
+- Kubernetes 1.20+
+- OpenShift 4.6+
+- Rancher
+- GKE(Google), including Anthos
+- Amazon EKS
+- Microsoft AKS
+- VMware Tanzu
+
+== crunchy data - PGO 설치하기
+=== 사전 조건
+- kubectl
+- git
+
+=== git clone
+-----
+git clone https://github.com/CrunchyData/postgres-operator-examples.git
+-----
+
+=== PGO(operator) 설치
+[source, bash]
+-----
+kubectl apply -k kustomize/install/namespace
+kubectl apply --server-side -k kustomize/install/default
+-----
+
+- pgo 설치 상태확인
+-----
+kubectl -n postgres-operator get pods \
+  --selector=postgres-operator.crunchydata.com/control-plane=postgres-operator \
+  --field-selector=status.phase=Running
+-----
+
+
+== 세부기능
+=== PostgreSQL Cluster 생성
+Operator를 배포 후에 PostgresCluster(CR)을 배포할 수 있습니다. PGO에서는 예시로 제공하는 Cluster를 생성할 수 있습니다. namespace는 postgres-operator의 hippo라는 이름으로 생성됩니다.
+-----
+kubectl apply -k kustomize/postgres
+-----
+
+해당 kustomize/postgres의 postgres.yaml 파일을 살펴보도록 하겠습니다.
+
+[source,yaml]
+-----
+apiVersion: postgres-operator.crunchydata.com/v1beta1
+kind: PostgresCluster
+metadata:
+  name: hippo
+spec:
+  image: registry.developers.crunchydata.com/crunchydata/crunchy-postgres:ubi8-14.4-0
+  postgresVersion: 14
+  instances:
+    - name: instance1
+      dataVolumeClaimSpec:
+        accessModes:
+        - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: 1Gi
+  backups:
+    pgbackrest:
+      image: registry.developers.crunchydata.com/crunchydata/crunchy-pgbackrest:ubi8-2.38-2
+      repos:
+      - name: repo1
+        volume:
+          volumeClaimSpec:
+            accessModes:
+            - "ReadWriteOnce"
+            resources:
+              requests:
+                storage: 1Gi
+-----
+PGO를 생성할 때 Custom Resource : PostgresCluster를 생성하여 해당 Object를 배포할 수 있습니다.
+
+- spec.image +
+ registry.developers.crunchydata.com/crunchydata/crunchy-postgres:ubi8-14.4-0 링크에 있는 이미지를 PostgreSQL을 사용합니다.
+- spec.backups.pgbackrest
+ * spec.backups.pgbackrest.image +
+또한 backup에 대한 pgbackrest에 대한 이미지를 registry.developers.crunchydata.com/crunchydata/crunchy-pgbackrest:ubi8-2.38-2 링크에서 가져옵니다.
+ * spec.backups.pgbackrest.repos.volume +
+  pgbackrest가 사용할 accessMode와 resource 등에 대해 정의할 수 있습니다. 예에서는 accessMode는 Read/Write Once로 정의하였고, storage 1G에 대한 리소스를 요청하였습니다.
+- spec.instances +
+PostgreSQL pod가 생성될 instance에 대한 정의입니다.
+ * spec.instances.name +
+instance의 name을 정의할 수 있습니다. 이것은 선택사항입니다.
+ * spec.instances.dataVolumeClaimSpec +
+PostgreSQL이 사용할 볼륨에 대한 정의입니다. Kubernetes에서 PVC를 의미합니다. spec.instances.dataVolumeClaimSpec.stroageClassName을 지정하지 않으면 기본 StorageClass로 생성이 됩니다.
+
+만약 직접 pod에 연결하여 확인하고 싶다면 다음 명령어로 실행합니다.
+
+[source,bash]
+-----
+kubectl exec -it -n postgres-operator $(kubectl -n postgres-operator get pods \
+  --selector=postgres-operator.crunchydata.com/role=master \
+  -o jsonpath='{.items[*].metadata.labels.postgres-operator\.crunchydata\.com/instance}')-0 -- /bin/sh
+-----
+
+=== PostgresCluster 연결
+PostgreCluster를 생성하면 service가 다음과 같이 생성됩니다.
+-----
+[root@~] $ kubectl -n postgres-operator get svc --selector=postgres-operator.crunchydata.com/cluster=hippo
+NAME              TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)    AGE
+hippo-ha          ClusterIP   10.103.73.92   <none>        5432/TCP   3h14m
+hippo-ha-config   ClusterIP   None           <none>        <none>     3h14m
+hippo-pods        ClusterIP   None           <none>        <none>     3h14m
+hippo-primary     ClusterIP   None           <none>        5432/TCP   3h14m
+hippo-replicas    ClusterIP   10.98.110.215  <none>        5432/TCP   3h14m
+-----
+
+service는 대부분 PostgresCluster의 상태를 관리하는데 사용됩니다. Client가 PostgreSQL 서버에 접속할 때 사용되는 Service는 `hippo-primary` 입니다.
+
+여기서 cluster에 접근할 수 있는 인증에 대한 정보는 Secret에 저장되어 있습니다. <clusterName>-pguser-<userName>으로 정의되며 이 경우에는 hippo-pguser-hippo라는 이름의 secret으로 정의됩니다. Secret에는 다음과 같은 정보가 저장되어 있습니다.
+
+- user : user 계정 이름입니다.
+- password : user 계정의 패스워드입니다.
+- dbname : 기본적으로 접속할 수 있는 데이터베이스 이름입니다.
+- host : 데이터베이스의 hostname입니다. 기본적으로 Primary instance의 Service를 참고합니다.
+- port : 리스닝하는 port입니다.
+- uri : PostgreSQL에 접속할 수 있는 URI에 대한 정보입니다.
+- jdbc-uri : JDBC를 통하여 데이터베이스에 접근하기 위한 URI입니다.
+
+모든 연결은 TLS를 통해 이루어지며 PGO는 애플리케이션을 Postgres Cluster에 안전하게 연결할 수 있도록 CA를 제공합니다.
+
+==== Service 수정
+기본적으로 PGO는 Service를 ClusterIP로 제공합니다. Service를 수정하여 Service type을 변경할 수 있습니다. +
+서비스를 다음과 같이 변경하면 Service를 NodePort로 설정할 수 있습니다.
+[source,yaml]
+-----
+spec:
+  service:
+    type: NodePort
+-----
+
+==== Application 연결
+다음은 keycloak에 Database에 대한 정보를 연결하기 위해 사용되는 manifest입니다. 예시에서 namespace는 postgres-operator를 사용하였습니다.
+[source,yaml]
+-----
+- name: DB_ADDR
+  valueFrom: { secretKeyRef: { name: hippo-pguser-hippo, key: host } }
+- name: DB_PORT
+  valueFrom: { secretKeyRef: { name: hippo-pguser-hippo, key: port } }
+- name: DB_DATABASE
+  valueFrom: { secretKeyRef: { name: hippo-pguser-hippo, key: dbname } }
+- name: DB_USER
+  valueFrom: { secretKeyRef: { name: hippo-pguser-hippo, key: user } }
+- name: DB_PASSWORD
+  valueFrom: { secretKeyRef: { name: hippo-pguser-hippo, key: password } }
+-----
+
+=== 고가용성
+
+==== PostgreSQL Cluster의 복제본 추가 +
+PostgreSQL Instance에 대한 replica(복제본)를 제공합니다. 해당 서비스는 `hippo-replicas` 로 제공됩니다.
+
+- spec.instances.replicas +
+instace의 PostgreSQL node를 얼마나 생성할지 정의합니다. replicas가 2라면 Primary 1개, Standby 1개가 생성됩니다.
+
+
+==== Service의 고가용성 +
+- 테스트 : 서비스 제거 +
+    Service들에 대한 제거를 인지하고 Operator가 재생성합니다.
+==== 기본 StatefulSet 제거 +
+Statefulset을 삭제하면 StatefulSet을 다시 재생성합니다. +
+- Primary Pod 확인
+[source,bash]
+-----
+PRIMARY_POD=$(kubectl -n postgres-operator get pods \
+  --selector=postgres-operator.crunchydata.com/role=master \
+  -o jsonpath='{.items[*].metadata.labels.postgres-operator\.crunchydata\.com/instance}')
+
+kubectl delete sts -n postgres-operator "${PRIMARY_POD}"
+-----
+현재 테스트 시 primary pod는 hippo-instance1-ch7s
+입니다.
+
+- SatefulSet 삭제 후 재생성 확인
+StatefulSet 삭제 후에도 다시 같은 이름으로 재생성되는 것을 확인할 수 있습니다. 
+[source,bash]
+-----
+[crunchy@crunchy-pgo ~]kubectl get sts -n postgres-operator \
+  --selector=postgres-operator.crunchydata.com/cluster=hippo,postgres-operator.crunchydata.com/instance
+NAME                   READY   AGE
+hippo-instance1-ch7s   1/1     13s
+hippo-instance1-spzb   1/1     17m
+-----
+    
+==== Synchronous_mode
+동기복제를 지원합니다. 이 동기화 모드는 PostgreSQL에서 지원하는 동기화 모드를 사용하는 것입니다. PostgreSQL의 Synchronous 모드는 복제본에 Commit이 될 때까지 트랜잭션의 Commit으로 간주하지 않기 때문에 data loss가 큰 시스템에 적절합니다. 하지만 이러한 동기모드는 성능적인 저하를 불러옵니다. 트랜잭션이 모든 복제본에서 Commit이 된 것을 확인할 때까지 기다려야 하기 때문입니다. +
+추가적으로 PostgreSQL parameter의 설정으로 설정할 수도 있습니다.
+
+[source, yaml]
+-----
+spec:
+  partroni:
+    dynamicConfiguration:
+      synchronous_mode: true
+      postgresql:
+        parameters:
+          synchronous_commit: "on"
+-----
+
+==== Affinity +
+PGO는 PostgreSQL Cluster의 label을 통해서 Pod anti-affinity & Node affinity를 지원합니다.
+
+|=====================
+|`postgres-operator.crunchydata.com/cluster`| 이것은 Cluster가 존재하는 Node에 할당합니다. 여기서 비교하는 값은 PostgreSQL Cluster의 이름입니다.
+|`postgres-operator.crunchydata.com/instance-set`| 이것은 `spec.instances` 의 값을 선택하게 됩니다. 만약 해당 값을 선택하고 싶지 않다면 PGO가 NN(정수)와 같은 값을 자동으로 생성합니다. (e.g. 00)
+|`postgres-operator.crunchydata.com/instance`| PostgreSQL Cluster가 가지고 있는 Instance에 unique하게 할당된 레이블을 선택합니다.
+|=====================
+
+- Pod Anti-Affinity +
+`preferredDuringSchedulingIgnoredDuringExecution` (Soft Affinity), `requiredDuringSchedulingIgnoreDuringExecution` (Hard Affinity) 과 같은 Anti-Affinity에 대한 규칙을 선언할 수 있으며 `matchLabels` 로 label을 선택하여 Affinity 대상 Node를 선택할 수 있습니다.
++
+[source,yaml]
+-----
+apiVersion: postgres-operator.crunchydata.com/v1beta1
+kind: PostgresCluster
+metadata:
+  name: hippo
+spec:
+  image: registry.developers.crunchydata.com/crunchydata/crunchy-postgres:ubi8-14.4-0
+  postgresVersion: 14
+  instances:
+    - name: instance1
+      replicas: 2
+      dataVolumeClaimSpec:
+        accessModes:
+        - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: 1Gi
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 1
+            podAffinityTerm:
+              topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  postgres-operator.crunchydata.com/cluster: hippo
+                  postgres-operator.crunchydata.com/instance-set: instance1
+  backups:
+    pgbackrest:
+      image: registry.developers.crunchydata.com/crunchydata/crunchy-pgbackrest:ubi8-2.38-2
+      repos:
+      - name: repo1
+        volume:
+          volumeClaimSpec:
+            accessModes:
+            - "ReadWriteOnce"
+            resources:
+              requests:
+                storage: 1Gi
+-----
++
+여기서 PostgreSQL Cluster의 Instance의 Node는 PostgreSQL Cluster의 name이 hippo 그리고 instance name이 instance1으로 생성된 Node에 할당되게 됩니다. `preferredDuringSchedulingIgnoredDuringExecution` 로 정의된 Soft Affinity로 정의됩니다.
+
+- Node Affinity +
+  Node Affinity의 경우에는 Node의 label을 통하여 설정이 가능합니다.
+
+- Pod Topology Spread Constraints +
+Pod의 Pod-Affinity를 이용하면 topology를 통하여 Node로의 배포를 정할 수 있지만 Topology Spread Constraints(토폴로지 확산 제약)를 이용하면 더 미세하게 Node에 대한 배포 정책을 사용할 수 있습니다.
+ * API 필드 구성
++
+[source, yml]
+-----
+ topologySpreadConstraints:
+ - maxSkew: <integer>
+   topologyKey: <string>
+   whenUnsatisfiable: <string>
+   labelSelector: <object>
+-----
++
+|=====================
+|maxSkew | Pod가 균등하지 않게 분산될 수 있는 정도
+|topologyKey | Node Label의 키
+|whenUnsatisfiable | 분산 제약 조건을 만족하지 않은 경우에 처리 방법 (DoNotSchedule<default>, ScheduleAnyway)
+|labelSelector | 일치하는 Pod를 찾는데 사용
+|=====================
+
+ * Spread Constraint 예시
++
+[source,yaml]
+-----
+instances:
+ - name: instance1
+   replicas: 5
+   topologySpreadConstraints:
+     - maxSkew: 1
+       topologyKey: my-node-label
+       whenUnsatisfiable: DoNotSchedule
+       labelSelector:
+         matchLabels:
+           postgres-operator.crunchydata.com/instance-set: instance1
+-----
++
+해당 예시에서는 5개의 instance가 생성될 것입니다. 각 Pod는 `postgres-operator.crunchydata.com/instance-set` 에서 정의된 Cluster에 instance1이 생성된 Node를 선택할 것입니다. 그리고 Node의 Label 중 `my-node-label` 인 것을 선택합니다. `whenUnsatisfiable` 이 DoNotSchedule로 설정된 것으로 보아 만약 알맞은 Noe가 없다면 instance들은 배포되지 않습니다.
+
+=== PostgresCluster Size 조정
+PostgresCluster를 기본적으로만 설정한다면 트래픽이 많아지면 해당 리소스를 재조정해야합니다. PGO는 여기서 Cluster에 대한 리소스를 조정할 수 있습니다.
+
+==== Memory 및 CPU 조정
+
+- spec.instances.resources +
+PostgreSQL 컨테이너에 대한 리소스를 정의할 수 있습니다. (cpu, memory)
+- spec.instances.sidecars.replicaCertCopy.resources +
+replica-cert-copy 사이드카 컨테이너의 리소스를 설정하는 섹션입니다.
+- spec.monitoring.pgmonitor.exporter.resources +
+ pgmonitor의 exporter 사이드카 컨테이너의 리소스를 설정하는 섹션입니다.
+- spec.backups.pgbackrest.repoHost.resources +
+pgBackRest repository 호스트 컨테이너에 대한 리소스와 연결된 pod의 모든 초기화 컨테이너 및 pgBackRestVolume 데이터 마이그레이션 작업에 의해 생성된 컨테이너에 대한 리소스를 설정하는 섹션입니다.
+- spec.backups.pgbackrest.sidecars.pgbackrest.resources +
+pgbackrest 사이드카 컨테이너의 리소스를 설정하는 섹션입니다.
+- spec.backups.pgbackrest.sidecars.pgbackrestConfig.resources +
+pgbackrest-config 사이드카 컨테이너의 리소스를 설정하는 섹션입니다.
+- spec.backups.pgbackrest.jobs.resources +
+ pgBackRest 백업 작업에 대한 리소스를 설정하는 섹션입니다.
+- spec.backups.pgbackrest.restore.resources +
+수동 pgBackRest 복원 작업에 대한 리소스를 설정하는 섹션입니다.
+- spec.dataSource.postgresCluster.resources +
+복제 프로세스 중에 생성된 pgBackRest 복원 작업에 대한 리소스를 설정하는 섹션 입니다.
+- spec.proxy.pgBouncer.resources +
+pgbouncer 컨테이너에 대한 리소스를 설정합니다 .
+- spec.proxy.pgBouncer.sidecars.pgbouncerConfig.resources +
+pgbouncer-config 사이드카 컨테이너의 리소스를 설정하는 섹션입니다.
+
+==== PVC 조정
+Database의 볼륨 확장은 필수적인 사항입니다. Kubernetes에서 관리하는 Volume은 PVC이며 StorageClass의 기능입니다. PVC의 크기를 줄일 수는 없습니다.
+[source,yaml]
+-----
+spec:
+  instances:
+    dataVolumeClaimSpec:
+      resources:
+        requests:
+          storage: 10Gi
+-----
+
+
+==== 확장을 허용하지 않는 StorageClass의 PVC 조정
+StorageClass 정책이 PVC를 확장시키지 못할 수 있습니다. PGO에서는 `spec:instances` 를 여러개 만들어 우회하는 방안을 사용합니다.
+
+기존에 instance가 1개 있는 Cluster라고 가정합니다.
+[source,yaml]
+-----
+  instances:
+    - name: instance1
+      replicas: 2
+      resources:
+        limits:
+          cpu: 2.0
+          memory: 4Gi
+      dataVolumeClaimSpec:
+        accessModes:
+        - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: 1Gi
+-----
+만약 해당 instance1에 대한 dataVolumeClaimSpec에 대한 resource를 늘릴 수 없는 Storage라고 한다면 직접적으로 instance의 resource를 늘릴 수는 없습니다.
+
+그래서 PGO는 다음과 같이 새로운 instance를 만들어 Volume을 확장하여 제공하는 것을 권장합니다.
+[source,yaml]
+-----
+  instances:
+    - name: instance1
+      replicas: 2
+      resources:
+        limits:
+          cpu: 2.0
+          memory: 4Gi
+      dataVolumeClaimSpec:
+        accessModes:
+        - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: 1Gi
+    - name: instance2
+      replicas: 2
+      resources:
+        limits:
+          cpu: 2.0
+          memory: 4Gi
+      dataVolumeClaimSpec:
+        accessModes:
+        - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: 10Gi
+-----
+새로운 instance2는 10G의 볼륨을 가지게 됩니다. 이렇게 배포한 후에 instance1을 삭제한다면 instance2가 Primary로 승격되어 더 큰 PVC를 가진 instance로 운영이 가능하게 됩니다.
+
+=== PostgresCluster Customizing
+PostgresCluster의 리소스의 크기를 조정한 후 리소스 사용에 대한 최적화도 할 수 있습니다.
+==== PostgreSQL 사용자 정의
+`spec.patroni.dynamicConfiguration` 을 통하여 PostgreSQL의 설정을 할 수 있습니다. PostgresCluster의 partroni 부분만 보면 다음과 같습니다.
+[source,yaml]
+-----
+patroni:
+  dynamicConfiguration:
+    postgresql:
+      parameters:
+        max_parallel_workers: 2
+        max_worker_processes: 2
+        shared_buffers: 1GB
+        work_mem: 2MB
+-----
+parameter에 대한 조정을 가능하게 합니다.
+
+==== TLS 사용자 정의
+PGO는 기본적으로 TLS로 통신하는데 TLS에 대하여 변경할 수 있습니다.
+<TLS 내용 추가>
+
+==== Label
+PostgresCluster의 label을 부여하는 방법에는 여러가지가 있습니다.
+
+- spec.metadata.labels +
+PostgresCluster의 label을 부여할 수 있습니다.
+- spec.instances.metadata.labels +
+Postgres instance에 대하여 label을 부여할 수 있습니다.
+- spec.backups.pgbackrest.metadata.labels +
+pgBackrest에 대한 label을 부여할 수 있습니다.
+- spec.proxy.pgBouncer.metadata.labels +
+pgBouncer connection Pooling에 대하여 label을 부여할 수 있습니다.
+
+==== Annotation
+- spec.metadata.annotations +
+PostgresCluster의 annotation을 부여할 수 있습니다.
+- spec.instances.metadata.annotations +
+Postgres instance에 대하여 annotation을 부여할 수 있습니다.
+- spec.backups.pgbackrest.metadata.annotations +
+pgBackrest에 대한 annotation을 부여할 수 있습니다.
+- spec.proxy.pgBouncer.metadata.annotations +
+pgBouncer connection Pooling에 대하여 annotation을 부여할 수 있습니다.
+
+==== Pod Priority Classes
+Pod가 배포되지 않는 상황이 발생한다면 pod에 대한 우선순위를 지정할 수 있습니다. PGO는 생성하는 pod에 대한 pod priority class를 설정할 수 있습니다.
+- spec.instances.priorityClassName
+- spec.backups.pgbackrest.repoHost.priorityClassName
+- spec.proxy.pgBouncer.priorityClassName
+- spec.backups.pgbackrest.jobs.priorityClassName
+- spec.dataSource.postgresCluster.priorityClassName
+
+==== WAL PVC 생성
+WAL파일에 대한 볼륨을 분리하는 것이 성능적인 측면에서 이점이 있습니다. 그래서 PGO는 WAL PVC를 분리하는 것에 대한 기능을 제공합니다. `walVolumeClaimSpec` 으로 accessModes 및 resource(용량)을 지정할 수 있습니다.
+[source, yaml]
+-----
+spec:
+  instances:
+    - name: instance
+      walVolumeClaimSpec:
+        accessModes:
+        - "ReadWriteMany"
+        resources:
+          requests:
+            storage: 1Gi
+-----
+
+==== init SQL 설정
+ConfigMap을 통하여 instance가 생성될 때 실행되는 SQL을 설정할 수 있습니다. +
+예로 init.sql 에 "create table test (c1 char(2));" 구문을 작성하여 설정합니다. 그리고 configMap을 통해 해당 sql을 등록합니다.
+[source,bash]
+-----
+kubectl -n postgres-operator create configmap hippo-init-sql --from-file=init.sql=/path/to/init.sql
+-----
+
+그리고 해당 sql을 sepc.databaseInitSQL에서 정의합니다. 해당 configmap과 cluster는 같은 namespace에 있어야합니다.
+[source,yaml]
+-----
+spec:
+  databaseInitSQL:
+    key: init.sql
+    name: hippo-init-sql
+-----
+
+==== PSQL 사용
+psql을 사용하여 database를 설정할 수 있습니다.
+
+- meta-command 이용
+[source,sql]
+-----
+\c <database_name>
+-----
+
+- 한 트랜잭션에 다중 sql 문 입력
+[source,sql]
+-----
+BEGIN;
+create table test (c1 char(2));
+COMMIT;
+-----
+
+만약에 databaseInitSQL로 psql에 대한 상태가 0(오류)을 반환한다면 다시 해당 sql을 실행하지 않습니다. error exit code도 마찬가지입니다. 다시 정상적인 실행을 위해서는 ConfigMap을 수정하여 반영하여야 합니다.
+
+=== User/Database 관리
+기본적으로 PostgresCluster CRD를 이용하여 Database User를 추가할 수 있습니다.
+[source,yaml]
+-----
+spec:
+  users:
+    - name: rhino
+-----
+
+- user는 기본적으로 postgres 데이터베이스에만 연결할 수 있습니다.
+- user는 "hippo-pguser-rhino" secret에 connection에 대한 정보가 없습니다.
+- 사용자는 권한이 없습니다.
+
+user에 대한 database를 생성할 수 있습니다. 다음과 같이 zoo라는 데이터베이스를 생성하면서 rhino user가 액세스할 수 있습니다. option으로 user에게 superuser에 대한 권한도 부여할 수 있습니다.
+[source,yaml]
+-----
+spec:
+  users:
+    - name: rhino
+      databases:
+        - zoo
+      options: "SUPERUSER"
+-----
+
+option 에서 사용자에 대한 권한을 부여할 수 있습니다.(CREATEDB CREATEROLE ....)
+
+==== User/Database 삭제
+yaml에서 해당 user 및 database에 대한 정의가 사라진다고 해서 실제 object가 사라지지 않습니다. +
+그래서 생성한 user와 database 삭제하려면 수동은 sql을 실행해주어야 합니다.
+[source,sql]
+-----
+DROP ROLE rhino;
+DROP DATABASE zoo;
+-----
+
+=== Software Update
+==== PostgreSQL Minor Update
+spec.image를 수정하면 update됩니다.
+[source,yaml]
+-----
+spec:
+  image: registry.developers.crunchydata.com/crunchydata/crunchy-postgres:centos8-14.2-1
+-----
+아래의 명령어를 통해 현재 instance들의 postgresql image버전을 확인할 수 있습니다.
+[source,bash]
+-----
+kubectl -n postgres-operator get pods \
+  --selector=postgres-operator.crunchydata.com/cluster=hippo,postgres-operator.crunchydata.com/instance \
+  -o=jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.labels.postgres-operator\.crunchydata\.com/role}{"\t"}{.status.phase}{"\t"}{.spec.containers[].image}{"\n"}{end}'
+-----
+
+**같은 방식으로 PostgreSQL minor 버전을 Rollback 할 수도 있습니다.**
+
+==== 기타 구성요소 업데이트
+pgBackrest, pgBouncer 등의 이미지들도 같은 방식으로 업데이트가 가능합니다.
+
+=== Backup 구성
+PGO는 오픈소스인 pgBackrest를 이용하여 backup을 유지 및 관리합니다. PGO에서 다음과 같은 backup 작업들을 할 수 있습니다.
+
+- 자동 백업 및 보존 정책 설정
+- 여러 Cloud Platform의 Storage 지원
+ * Kubernetes Storage, AWS의 S3(MinIO), Google Cloud Storage, Azure Blob Storage
+- 일회성 백업 / ad hoc backups
+- PITR (Point-in-time-recovery)
+- 새로운 instance의 데이터 복제
+
+==== 백업 구성 및 기본 작업 이해
+pgBackrest는 버전을 표시하는 것 이외에도 여러 section을 이용하여 설정할 수 있습니다.
+- spec.backups.pgbackrest.configuration +
+  백업 구성에 필요한 구성을 설정할 수 잇ㅅ브니다. 
+- spec.backups.pgbackrest.global +
+  변수를 전역으로 설정할 수 있습니다. 예를 들어 log-level-console: info로 설정하게 되면 모든 pgBackrest의 logging수준을 info로 설정하게 바꿀 수 있습니다.
+- spec.backups.pgbackrest.repos +
+  repo는 앞에서 언급한 Storage를 지원하는 4가지 종류를 사용합니다. +
+  azure, gcs, s3, volume(kubernetes)로 구분합니다. 이 repo는 다중으로 설정할 수 있습니다.
+
+==== Kubernetes 볼륨 사용
+[source,yaml]
+-----
+- name: repo1
+  volume:
+    volumeClaimSpec:
+      accessModes:
+      - "ReadWriteOnce"
+      resources:
+        requests:
+          storage: 1Gi
+-----
+`spec.backups.pgbackrest.repos.volume.volumeClaimSpec` 으로 설정한 것입니다. 여기서 다른 storageclass를 사용하고 싶다면 `spec.backups.pgbackrest.repos.volume.volumeClaimSpec.storageClassName` 에 storageclass 이름을 지정합니다.
+==== S3 사용
+==== Google Cloud Storage(GCS) 사용
+==== Azure Blob Storage 사용
+==== 암호화
+
+==== 사용자 지정 백업 구성
+`spec.backups.pgbackrest.global` 을 통해서 하거나 ConfigMap, Secret을 통하여 구성할 수도 있습니다.
+
+=== Backup 관리
+WAL를 지속적으로 보관하여 효과적인 백업을 할 수도 있지만, 백업 정책은 PostgresCluster 전체를 백업하고 실행할 수 있도록 합니다. +
+다음과 같은 백업을 지원합니다.
+
+- full : PostgreCluster 전체를 백업합니다.
+- differntail : 마지막 백업 이후의 모든 데이터를 full 백업합니다.
+- incremental full : 변경된 데이터만 백업합니다.
+
+다음과 같이 schedule을 설정할 수 있습니다.
+[source,yaml]
+-----
+spec:
+  backups:
+    pgbackrest:
+      repos:
+      - name: repo1
+        schedules:
+          full: "0 1 * * 0"
+          differential: "0 1 * * 1-6"
+-----
+`spec.backups.pgbackrest.repos.schedules` 에 schedule 종류마다 기간을 지정할 수 있습니다.
+
+==== Backup 보존 정책 관리
+PGO를 pgBackrest를 통한 백업이 가능합니다. 하지만 지속적인 백업으로 인한 Disk full을 방지하기 위해 Backup본 보존관리 정책을 만들어야 합니다.
+
+- count : 보관하려는 백업본 개수를 지정합니다.
+- time : 백업을 원하는 총 일수를 기준으로 합니다.
+
+다음은 14일동안 full backup을 가지고 있는 것입니다. 자세한 것은 pgBackRest의 구성 가이드를 참고합니다.
+
+[source,yaml]
+-----
+spec:
+  backups:
+    pgbackrest:
+      global:
+        repo1-retention-full: "14"
+        repo1-retention-full-type: time
+-----
+
+==== 일회성 Backup
+보통 Application 변경 또는 업데이트 전의 상태를 백업하려는 용도로 수행하려는 경우 일회성 Backup을 사용합니다. +
+`spec.backups.pgbackrest.manual` 을 통하여 일회성 Backup을 수행할 수 있습니다.
+
+다음과 같이 수행하면 repo1이라는 백업본을 full backup하는 일회성 Backup이 수행하도록 설정합니다.
+[source,yaml]
+-----
+spec:
+  backups:
+    pgbackrest:
+      manual:
+        repoName: repo1
+        options:
+         - --type=full
+-----
+
+이렇게 설정한다고 바로 일회성 백업이 실행되지 않습니다. annotation을 설정하여 일회성 백업을 트리거합니다.
+[source,bash]
+-----
+kubectl annotate -n postgres-operator postgrescluster hippo \
+  postgres-operator.crunchydata.com/pgbackrest-backup="$(date)"
+-----
+
+만약 다시 annotation을 통해 트리거하고 싶다면 `--overwrite` 옵션을 추가하여 실행합니다.
+[source,bash]
+-----
+kubectl annotate -n postgres-operator postgrescluster hippo --overwrite \
+  postgres-operator.crunchydata.com/pgbackrest-backup="$(date)"
+-----
+
+=== Recovery & Cloning
+복원(Recovery)에 대한 속성은 `spec.dataSource.postgresCluster` 의 section에 함께 포함됩니다.
+
+- spec.dataSource.postgresCluster.clusterName +
+  복원할 Cluster의 이름을 지정합니다. 이것은 metatdata.name에 해당합니다.
+- spec.dataSource.postgresCluster.clusterNamespace +
+  복원할 Clsuter의 Namespace입니다. Cluster가 다른 Namespace에 존재할 때 사용합니다.
+- spec.dataSource.postgresCluster.repoName +
+  복원에 사용할 pgBackRest의 저장소(repo)의 이름을 의미합니다. repo는 다른 Cluster에 존재해야합니다.
+- spec.dataSource.postgresCluster.options +
+  복원에 필요한 pgBackRest의 옵션입니다.
+- spec.dataSource.postgresCluster.resources +
+  복원에 사용할 리소스를 정의합니다.
+- spec.dataSource.postgresCluster.affinity +
+  복원할 Cluster의 Node Affinity를 지정할 수 있습니다. 특정 Node에서만 복원작업을 할 수 있도록 한다는 의미입니다.
+- spec.dataSource.postgresCluster.tolerations +
+  해당 Cluster의 Pod가 taint된 node에서 실행될 수 있도록 합니다.
+
+==== Postgres 클러스터 복제
+기존의 Cluster Backup을 가지고 복제를 진행합니다. 여기서 cluster의 이름은 기존의 cluster인 hippo이며 repo(Backup)는 repo1을 선택합니다.
+[source,yaml]
+-----
+spec:
+  dataSource:
+    postgresCluster:
+      clusterName: hippo
+      repoName: repo1
+-----
+
+==== 특정 시점 복구(PITR) 수행
+Backup Storage로 특정 시점 복구(PITR)을 실행할 수 있습니다. 이 기능은 pgBackRest의 Recovery 명령을 통해 사용할 수 있습니다. 해당 명령은 spec.dataSource.postgresCluster.options 에서 옵션으로 설정합니다.
+
+- --type=time : pgBackRest가 time(시간)을 통해 PITR을 진행한다는 표시입니다.
+- --target : PITR을 수행할 시간대입니다. (e.g. 2021-06-09 14:15:11-04)
+- --set(선택 사항): PITR을 시작할 백업을 선택합니다.
+
+PITR을 수행하기 위해서는 특정 시점이 있어야합니다. 즉, Backup된 것에 특정 시점이 없다면 해당 시점으로 복구할 수 없습니다. 그리고 해당 복원을 정상적으로 수행하려면 WAL 파일이 성공적으로 쓰여져야 합니다.
+
+[source, yaml]
+-----
+spec:
+  dataSource:
+    postgresCluster:
+      clusterName: hippo
+      repoName: repo1
+      options:
+      - --type=time
+      - --target="2021-06-09 14:15:11-04"
+-----
+
+==== In-Place Point-in-time-Recovery (PITR) 수행
+위의 PITR은 새로운 Cluster를 생성하여 복구를 진행하게 됩니다. In-Place PITR의 경우에는 Cluster를 새로 생성하지 않고 해당 시점으로 유사하게 복구할 수 있습니다.
+
+일단 기존의 Cluster에 다음과 같이 수정합니다.
+[source, yaml]
+-----
+spec:
+  backups:
+    pgbackrest:
+      restore:
+        enabled: true
+        repoName: repo1
+        options:
+        - --type=time
+        - --target="2021-06-09 14:15:11-04"
+-----
+
+그리고 복원을 트리거하기 위해서 다음과 같은 Annotation을 사용합니다.
+[source,bash]
+-----
+kubectl annotate -n postgres-operator postgrescluster hippo --overwrite \
+  postgres-operator.crunchydata.com/pgbackrest-restore=id1
+-----
+
+복원이 완료되면 **spec.backups.pgbackrest.restore.enabled 값을 false로 설정**하여 비활성화합니다.
+
+- In-Place PITR에서 개별적으로 데이터베이스를 복원할 수 있습니다. options 값에 `--db-include=<DB_NAME>` 을 사용하면 해당 Database만 PITR을 진행할 수 있습니다.
+[source, yaml]
+-----
+spec:
+  backups:
+    pgbackrest:
+      restore:
+        enabled: true
+        repoName: repo1
+        options:
+        - --db-include=hippo
+-----
+
+==== Standby Cluster
+HA와 재해 복구 전략을 고려할 때 Database Cluster가 여러 Data Center에 분할되어 uptime을 최대한으로 만들어야합니다. 이것은 Kubernetes에서 말하는 "federation"입니다. 연합된 Kubernetes Cluster는 서로 통신하며, 변경사항을 통합하고 요구사항이 높은 어플리케이션을 제공할 수 있도록 합니다.
+
+Federation은 아직 Kubernetes 측에서도 아직 개발중입니다. 외부 Storage System을 사용하여 다중 Kubernetes Cluster에 구성할 때 배포하는 방법을 여러 Cloud Platform(AWS, Azure, Google Cloud)에서 Storage를 제공합니다.
+
+Standby Cluster는 다른 PGO의 PostgresCluster와 같이 관리되게 됩니다. 예를 들어 Standby에 spec.instances.replicas를 하게 되면 cascading replication과 같이 Standby의 Standby Node가 replica로 동작합니다. Standby이기 때문에 Read only입니다.
+
+아래는 Standby Cluster에 대한 정의입니다. 이 Cluster는 AWS의 S3에서 Recovery하는 방식으로 Standby Cluster로 동작하게 됩니다.
+[source, yaml]
+-----
+apiVersion: postgres-operator.crunchydata.com/v1beta1
+kind: PostgresCluster
+metadata:
+  name: hippo-standby
+spec:
+  image: registry.developers.crunchydata.com/crunchydata/crunchy-postgres:ubi8-14.4-0
+  postgresVersion: 14
+  instances:
+    - dataVolumeClaimSpec:
+        accessModes:
+        - "ReadWriteOnce"
+        resources:
+          requests:
+            storage: 1Gi
+  backups:
+    pgbackrest:
+      image: registry.developers.crunchydata.com/crunchydata/crunchy-pgbackrest:ubi8-2.38-2
+      repos:
+      - name: repo1
+        s3:
+          bucket: "my-bucket"
+          endpoint: "s3.ca-central-1.amazonaws.com"
+          region: "ca-central-1"
+  standby:
+    enabled: true
+    repoName: repo1
+-----
+
+==== S3 / GCS / Azure Blob Storage의 Bakcup Clone 생성
+<추후에 내용 추가 예정>
+
+=== Monitoring
+==== Export Sidecar 추가
+모니터링 도구는 spec.monitoring section을 이용하여 추가할 수 있습니다. 현재 PGO에서 지원하는 모니터링 도구는 pgMonitor로 구성할 수 있습니다.
+
+유일하게 monitoring할 수 있는 속성은 `spec.monitoring.pgmonitor.exporter.image` 입니다.
+[source,yaml]
+-----
+monitoring:
+  pgmonitor:
+    exporter:
+      image: registry.developers.crunchydata.com/crunchydata/crunchy-postgres-exporter:ubi8-5.1.2-0
+-----
+
+==== Metric 액세스
+pgMonitor의 export가 실행되면 Prometheus, Grafana, Alertmanager를 통한 monitoring stack을 구성할 수 있습니다.
+
+=== Connection Pooling
+PGO는 Connection Pooling을 pgBouncer를 통하여 관리합니다.
+
+pgMonitor와 마찬가지로 pgBouncer도 sidercar로 제공됩니다. `spec.proxy.pgBouncer.image` 속성으로 pgBouncer의 이미지를 가지고 옵니다.
+
+[source,yaml]
+-----
+proxy:
+  pgBouncer:
+    image: registry.developers.crunchydata.com/crunchydata/crunchy-pgbouncer:ubi8-1.16-4
+-----
+
+==== Connection Pooling 사용
+PGO에서 제공하는 예시의 kustomize/key/cloack에 pgBoucner를 설정했다고 가정합니다. +
+pgBoucer가 Cluster에 배포되면서 PGO는 Application이 직접 pgBouncer(connection pooler)에 접근할 수 있도록 사용자 Secret 정보를 추가해야합니다.
+
+- 해당 예시의 secret 조회
++
+-----
+kubectl -n postgres-operator describe secrets keycloakdb-pguser-keycloakdb
+-----
+
+Secret의 각 key의 value값은 다음과 같습니다.
+
+- pgbouncer-host : pgBouncer 호스트의 이름입니다.
+- pgbouncer-port : pgBouncer가 리스닝하는 포트입니다.
+- pgbouncer-uri : pgBouncer를 연결할 PostgreSQL 연결 URI입니다.
+- pgbouncer-jdbc-uri : jdbc 드라이버를 사용하여 pgBouncer를 사용할 때 필요한 URI입니다.
+
+따라서 해당하는 Application에는 다음과 같이(예시 keycloak) Secret의 정보를 주입합니다.
+
+[source,yaml]
+-----
+- name: DB_ADDR
+  valueFrom: { secretKeyRef: { name: keycloakdb-pguser-keycloakdb, key: pgbouncer-host } }
+- name: DB_PORT
+  valueFrom: { secretKeyRef: { name: keycloakdb-pguser-keycloakdb, key: pgbouncer-port } }
+-----
+
+==== TLS
+PGO는 TLS를 통해 모든 클러스터와 구성요소를 배포하기 때문에 pgBouncer 또한 마찬가지입니다.
+<TLS 내용 추가>
+
+==== pgBouncer Customizing
+pgBouncer의 기본 구성을 커스터마이징 할 수 있도록 제공합니다. `spec.proxy.pgBouncer.config` 을 통하여 설정할 수 있습니다.
+
+- spec.proxy.pgBouncer.config.global: 변경 사항을 PgBouncer에 전역적으로 적용하는 키-값 쌍을 허용합니다.
+- spec.proxy.pgBouncer.config.databases: PgBouncer 데이터베이스 정의를 나타내는 키-값 쌍을 허용합니다.
+- spec.proxy.pgBouncer.config.users: 특정 사용자에게 적용된 연결 설정을 나타내는 키-값 쌍을 허용합니다.
+- spec.proxy.pgBouncer.config.files: /etc/pgbouncer의 디렉토리에 마운트 되는 파일의 리스트를 허용합니다. 그리고 다른 옵션들이 설정되기 전에 고려되어 설정됩니다.
+
+아래는 설정 예시입니다.
+
+[source,yaml]
+-----
+spec:
+  proxy:
+    pgBouncer:
+      config:
+        global:
+          pool_mode: transaction
+-----
+
+추가적으로 pgBouncer의 복제본(replica), resource 설정, Annotation 및 Label, Affinity, Toleration, Pod Spread Constraints의 설정이 가능합니다.
+
+=== Administrative Task
+==== PostgreSQL 재시작 
+PostgreSQL 서버를 재시작 해야할 상황이 생길 수 있습니다. 이것은 `spec.metadata.annotations` section을 통해 재시작을 알릴 수 있습니다. 
+
+아래의 예는 namespace:postgres-operator에 있는 hippo 라는 이름의 postgrescluter 를 재시작하라는 annotation을 부여합니다.
+[source, bash]
+-----
+kubectl patch postgrescluster/hippo -n postgres-operator --type merge \
+  --patch '{"spec":{"metadata":{"annotations":{"restarted":"'"$(date)"'"}}}}'
+-----
+==== PostgreSQL 종료
+PostgresCluster는 `spec:shutdown` 값을 true로 설정하면 종료할 수 있습니다.
+[source,bash]
+-----
+kubectl patch postgrescluster/hippo -n postgres-operator --type merge \
+  --patch '{"spec":{"shutdown": true}}'
+-----
+==== TLS 인증서 교체
+비밀번호와 달리 TLS는 인증서 만료일이 있기 때문에 교체를 해주어야 합니다. PGO는 downtime없이 PosgreSQL 서버 및 Secret의 변경 사항에 대해 자동으로 감지하여 갱신하게 할 수 있습니다.
+
+아래의 예는 pgBouncer의 새로운 Secret을 만들어 갱신하면 PGO가 pgBouncer를 rolling restart를 수행합니다.
+[source,yaml]
+-----
+spec:
+ proxy:
+   pgBouncer:
+     customTLSSecret:
+       name: hippo.pgbouncer.new.tls
+-----
+
+또는 annotation의 변경(spec: proxy: pgBouncer: metadata: annotations: restarted: Q1-certs) 후에 kubectl patch를 이용하여 갱신하는 방법도 있습니다. 
+
+[source,bash]
+-----
+kubectl patch postgrescluster/hippo --type merge \
+  --patch '{"spec":{"proxy":{"pgBouncer":{"metadata":{"annotations":{"restarted":"'"$(date)"'"}}}}}}'
+-----
+
+==== Primary 서버 변경
+`partroni.switchover` 를 통해서 Primary 변경이 가능합니다.
+
+[source, yaml]
+-----
+spec:
+  patroni:
+    switchover:
+      enabled: true
+-----
+
+해당 section을 정의한 후에 `postgres-operator.crunchydata.com/trigger-switchover` 트리거를 통해 switchover를 실행합니다.
+
+[source,bash]
+-----
+kubectl annotate -n postgres-operator postgrescluster hippo \
+  postgres-operator.crunchydata.com/trigger-switchover="$(date)"
+-----
+
+PGO는 Annotation을 감지하여 Patroni API를 사용하여 Primary 변경을 요청합니다. Patrnoi가 실행되어 기존의 Primary Pod에서 새로운 Pod로 role label이 'master'가 되고 기존의 Primary Pod는 'replica'로 변경됩니다. +
+변경된 이후에는 `spec.patroni.switchover.enabled` 를 false로 변경해줍니다. +
+
+- 특정 Instance를 지정하여 switchover를 할 수도 있습니다.
++
+[source,yaml]
+-----
+spec:
+  patroni:
+    switchover:
+      enabled: true
+      targetInstance: hippo-instance1-wm5p
+-----
+
+아래의 명령어를 통해서 master, replica Instance를 확인할 수 있습니다.
+
+[source,bash]
+-----
+$ kubectl get pods -l postgres-operator.crunchydata.com/cluster=hippo \
+    -L postgres-operator.crunchydata.com/instance \
+    -L postgres-operator.crunchydata.com/role
+
+NAME                      READY   STATUS      RESTARTS   AGE     INSTANCE               ROLE
+hippo-instance1-jdb5-0    3/3     Running     0          2m47s   hippo-instance1-jdb5   master
+hippo-instance1-wm5p-0    3/3     Running     0          2m47s   hippo-instance1-wm5p   replica
+-----
+
+==== Failover
+Cluster 비정상 상태가 될 때 Failover를 설정할 수 있습니다. 
+
+[source,yaml]
+-----
+spec:
+  patroni:
+    switchover:
+      enabled: true
+      targetInstance: hippo-instance1-wm5p
+      type: Failover
+-----
+
+=== PostgresCluster 삭제
+Cluster를 생성할 때 사용한 yaml을 이용하여 삭제할 수 있습니다.
+
+다음은 PGO에서 제공하는 example Cluster를 삭제하는 방법입니다.
+[source,bash]
+kubectl delete -k kustomize/postgres

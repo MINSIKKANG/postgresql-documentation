@@ -1,0 +1,44 @@
+= insert_username
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== insert_username 설명
+insert_username은 spi의 일종으로 현재 사용자의 이름을 텍스트 필드에 저장하는 트리거입니다. 이는 테이블 내 특정 행을 마지막으로 수정한 사람을 추적하는 데 유용합니다. 이 기능을 활용한 before insert 및 update 트리거 생성해서 사용하는 것이 좋습니다.
+
+== insert_username 예시
+insert_username을 트리거를 생성해서 활용하는 예시입니다.
+[source, sql]
+----
+CREATE TABLE username_test (
+	name		text,
+	username	text not null
+);
+
+CREATE TRIGGER insert_usernames
+	BEFORE INSERT OR UPDATE ON username_test
+	FOR EACH ROW
+	EXECUTE PROCEDURE insert_username (username);
+
+INSERT INTO username_test VALUES ('nothing');
+INSERT INTO username_test VALUES ('null', null);
+INSERT INTO username_test VALUES ('empty string', '');
+INSERT INTO username_test VALUES ('space', ' ');
+INSERT INTO username_test VALUES ('tab', '	');
+INSERT INTO username_test VALUES ('name', 'name');
+
+SELECT * FROM username_test;
+
+--postgres 유저로 진행했고, insert 시 자동으로 들어감을 확인
+postgres=# select * from username_test;
+     name     | username 
+--------------+----------
+ nothing      | postgres
+ null         | postgres
+ empty string | postgres
+ space        | postgres
+ tab          | postgres
+ name         | postgres
+(6 rows)
+----

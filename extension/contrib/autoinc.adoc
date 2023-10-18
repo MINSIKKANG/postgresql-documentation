@@ -1,0 +1,52 @@
+= autoinc
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== autoinc 설명
+autoinc는 spi(Server Programming Interface)의 하나로, sequence의 다음 값을 정수 필드에 저장하는 트리거 입니다.
+
+== autoinc 예시
+간단한 sequence와 table을 생성하여, autoinc를 사용하는 trigger를 걸어준 뒤 insert 및 update로 sequence 필드가 자동적으로 갱신되는 상황의 예시입니다.
+
+[source,sql]
+----
+CREATE SEQUENCE next_id START -2 MINVALUE -2;
+
+CREATE TABLE ids (
+	id		int4,
+	idesc		text
+);
+
+CREATE TRIGGER ids_nextid
+	BEFORE INSERT OR UPDATE ON ids
+	FOR EACH ROW
+	EXECUTE PROCEDURE autoinc (id, next_id); 
+	-- autoinc를 이용해 insert/update시 id 필드에 next_id 시퀀스 갱신값을 반영하겠다는 trigger입니다.
+
+INSERT INTO ids VALUES (0, 'first'); -- id에는 0, idesc에는 first 문자를 넣겠다는 의도입니다.
+INSERT INTO ids VALUES (null, 'second'); -- id에는 null값, idesc에는 second 문자를 넣겠다는 의도입니다.
+INSERT INTO ids(idesc) VALUES ('third'); -- idesc에만 third문자를 넣겠다는 의도입니다.
+
+select * from ids;
+-- 원래 결과값은 insert에 의도한대로 나와야하지만, autoinc 포함된 trigger가 발동하여, 
+--next_id sequence의 처음 값인 -2 부터 순차적으로 배당됩니다. 
+ id | idesc  
+----+--------
+ -2 | first
+ -1 | second
+  1 | third
+
+update ids set id = null, idesc = 'fourth' where idesc='first'; -- idesc가 first인 행을 null | fourth 로 update 하겠다는 의도입니다.
+
+SELECT * FROM ids;
+-- 원래 결과값은 update에 의도한대로 나와야하지만, autoinc 포함된 trigger가 발동하여, 1 다음 sequence 값인 2가 배당됩니다. 
+-- 그러면서 저절로 정렬이 됩니다.
+ id | idesc  
+----+--------
+ -1 | second
+  1 | third
+  2 | fourth -- -2 | first에서 변경된 값, 맨처음이아니라 맨 마지막행으로 정렬됨
+
+----

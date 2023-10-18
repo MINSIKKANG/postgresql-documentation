@@ -1,0 +1,63 @@
+= pgrowlocks
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== pgrowlocks 설명
+pgrowlocks 모듈은 지정된 테이블에 대한 row lock 정보를 표시하는 function을 제공합니다.
+
+* pgrowlocks(text) returns setof record +
+매개변수는 테이블의 이름입니다. 출력 결과는 아래와 같습니다.
+
+[width="80%",cols="3*",options="header"]
+|===
+|이름 | 유형 | 설명
+|locked_row | tid | locked_row의 튜플 ID(TID)
+|locker| xid | locker의 트랜잭션 ID 또는 다중 트랜잭션인 경우 multixact ID
+|multi | boolean | locker이 다중 트랜잭션인 경우 참
+|xids | xid[] | locker의 거래 ID(다중 거래의 경우 둘 이상)
+|modes | text[] | locker의 lock 모드(다중 트랜잭션인 경우 둘 이상), Key Share, Share, For No Key Update, No Key Update, For Update, Update.
+|pids | integer[] | locking backend의 프로세스 ID(다중 트랜잭션인 경우 둘 이상)
+
+|===
+
+pgrowlock는 AccessSharedlock을 얻게되고, 대상 테이블을 가져와서 각 행을 하나씩 읽어 행 lock 정보를 수집합니다. 아래와 같은 유의사항이 있습니다.
+
+1. 테이블에 AccessExclusiveLock이 걸리면 pgrowlock이 차단됩니다. +
+2. 일관된 스냅샷 생성을 보장하지 않습니다. 실행 중에 새 lock 잠금이 사용되거나 이전 lock 이 해제될 수 있습니다.
+
+== pgrowlocks 예시
+테이블을 만들어 lock 상황을 만들어 pgrowlocks 함수를 활용하는 예시입니다.
+2개의 세션이 필요하며, 각 스탭에 맞게 pgworlocks로 현황을 볼 수 있습니다.
+
+테스트 밑준비
+[source, sql]
+----
+CREATE TABLE multixact_conflict (a int PRIMARY KEY, b int);
+INSERT INTO multixact_conflict VALUES (1, 2), (3, 4);
+----
+
+session s1 에서 begin문으로 쿼리 수행
+[source, sql]
+----
+BEGIN;
+SELECT * FROM multixact_conflict FOR KEY SHARE;
+-[ RECORD 1 ]
+a | 1
+b | 2
+-[ RECORD 2 ]
+a | 3
+b | 4
+----
+
+session s2에서 pgrowlocks로 현황 확인
+[source, sql]
+----
+SELECT locked_row, multi, modes FROM pgrowlocks('multixact_conflict');
+ locked_row | multi |       modes       
+------------+-------+-------------------
+ (0,1)      | f     | {"For Key Share"}
+ (0,2)      | f     | {"For Key Share"}
+(2개 행)
+----

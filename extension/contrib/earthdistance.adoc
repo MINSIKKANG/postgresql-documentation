@@ -1,0 +1,119 @@
+= earthdistance
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== earthdistance 설명
+earthdistance 모듈은 지구 표면에서 대원(great circle) 거리를 계산하는 두가지 접근 방식을 제공합니다. 첫번째는 cube 모듈로 접근, 두번째는 point 좌표에 경도와 위도를 사용하는 내장 데이터 유형을 기반으로 접근합니다. 따라서 cube extension이 선행 설치가 되어있어야합니다. 또한 이 모듈은 지구는 완전한 구형이라 가정합니다.
+
+* 큐브 기반 earth distance 접근
+
+데이터는 지구 중심에서 x, y, z 거리를 나타내는 3개의 좌표를 사용하여 점(두 모서리 모두 동일)인 큐브에 저장됩니다. cube 위에 지구의 실제 표면에 합리적으로 가까운지 확인하는 제약 조건 검사를 포함하는 도메인 earth 가 제공됩니다. earth() 함수에서 지구의 반지름을 얻습니다(미터 단위). 다른 단위나 다른 반경 값을 사용가능합니다.
+
+제공되는 함수
+
+earth () returns float8 - 지구의 추정 반경을 반환합니다.
+
+sec_to_gc ( float8 ) returns float8 - 지구 표면의 두 점 사이의 직선 거리(secant)를 두 점 사이의 대원 거리로 변환합니다.
+
+gc_to_sec ( float8 ) returns float8 - 지구 표면의 두 점 사이의 대원 거리를 두 점 사이의 직선(secant) 거리로 변환합니다.
+
+ll_to_earth ( float8, float8 ) returns earth - 위도(인수 1)와 경도(인수 2)가 도 단위로 주어졌을 때 지구 표면에서 점의 위치를 반환합니다.
+
+latitude ( earth ) returns float8 - 지구 표면에 있는 한 지점의 위도를 도 단위로 반환합니다.
+
+longitude ( earth ) returns float8 - 지구 표면에 있는 점의 경도를 도 단위로 반환합니다.
+
+earth_distance ( earth, earth ) returns float8 - 지구 표면의 두 점 사이의 대원 거리를 반환합니다.
+
+earth_box ( earth, float8 ) returns cube - 위치에 지정된 대원 거리 내에 있는 점에 대해 cube의 @> 연산자를 사용하여 인덱싱된 검색에 적합한 상자를 반환합니다. 이 상자의 일부 점은 위치에서 지정된 대원 거리보다 더 멀리 떨어져 있으므로, earth_distance를 사용하는 두번째 확인이 쿼리에 포함되어야합니다.
+
+* 점 기반 earth distance 접근
+
+지구 위치를 point 유형의 값으로 나타내는데 의존합니다. 여기서 첫번째 구성요소는 경도를 도단위로, 두번째 구성요소는 위도를 도 단위로 나타냅니다. 경도는 x축, 위도는 y축 개념에 잡혀있기 때문에 점은 (경도, 위도)로 간주됩니다(위도, 경도 순으로는 허용하지 않습니다.)
+
+제공되는 연산자
+
+point <@> point → float8 - 지구 ㅍ ㅛ면의 두 지점 사이의 거리를 마일(miles) 단위로 계산합니다.
+
+
+== earthdistance 예시
+earthdistance가 제공하는 두가지 접근방식에 대한 예제입니다.
+
+[source, sql]
+----
+--지구 반지름
+SELECT earth()::numeric(20,5);
+     earth     
+---------------
+ 6378168.00000
+(1 row)
+
+SELECT sec_to_gc(0)::numeric(20,5);
+ sec_to_gc 
+-----------
+   0.00000
+(1 row)
+
+SELECT sec_to_gc(2*earth())::numeric(20,5);
+   sec_to_gc    
+----------------
+ 20037605.73216
+(1 row)
+
+SELECT gc_to_sec(0)::numeric(20,5);
+ gc_to_sec 
+-----------
+   0.00000
+(1 row)
+
+SELECT gc_to_sec(sec_to_gc(2*earth()))::numeric(20,5);
+   gc_to_sec    
+----------------
+ 12756336.00000
+(1 row)
+
+SELECT cube_ll_coord(ll_to_earth(0,0),1)::numeric(20,5),
+ cube_ll_coord(ll_to_earth(0,0),2)::numeric(20,5),
+ cube_ll_coord(ll_to_earth(0,0),3)::numeric(20,5);
+ cube_ll_coord | cube_ll_coord | cube_ll_coord 
+---------------+---------------+---------------
+ 6378168.00000 |       0.00000 |       0.00000
+(1 row)
+
+SELECT latitude(ll_to_earth(45,0))::numeric(20,10);
+   latitude    
+---------------
+ 45.0000000000
+(1 row)
+
+SELECT longitude(ll_to_earth(0,90))::numeric(20,10);
+   longitude   
+---------------
+ 90.0000000000
+(1 row)
+
+SELECT earth_distance(ll_to_earth(0,0),ll_to_earth(0,180))::numeric(20,5);
+ earth_distance 
+----------------
+ 20037605.73216
+(1 row)
+
+SELECT cube_ll_coord(earth_box(ll_to_earth(0,0),112000),1)::numeric(20,5),
+       cube_ll_coord(earth_box(ll_to_earth(0,0),112000),2)::numeric(20,5),
+       cube_ll_coord(earth_box(ll_to_earth(0,0),112000),3)::numeric(20,5),
+       cube_ur_coord(earth_box(ll_to_earth(0,0),112000),1)::numeric(20,5),
+       cube_ur_coord(earth_box(ll_to_earth(0,0),112000),2)::numeric(20,5),
+       cube_ur_coord(earth_box(ll_to_earth(0,0),112000),3)::numeric(20,5);
+ cube_ll_coord | cube_ll_coord | cube_ll_coord | cube_ur_coord | cube_ur_coord | cube_ur_coord 
+---------------+---------------+---------------+---------------+---------------+---------------
+ 6266169.43896 | -111998.56104 | -111998.56104 | 6490166.56104 |  111998.56104 |  111998.56104
+(1 row)
+
+SELECT ('(0,0)'::point <@> '(180,0)'::point)::numeric(20,5);
+   numeric   
+-------------
+ 12436.77274
+(1 row)
+----

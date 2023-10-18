@@ -1,0 +1,79 @@
+= bgw_replstatus extention
+:toc:
+:toc-title:
+:table-caption!:
+:sectnums:
+
+git 주소 : https://github.com/mhagander/bgw_replstatus
+
+== bgw_replstatus 란?
+
+bgw_replstatus란 replication이 설정된 노드들을 간단하게 report해주는 백그라운드 worker입니다. +
+설치되면 TCP port를 이용하여 백그라운드로 실행됩니다. TCP 요청이 오면 Master, Standby라는 응답을 줍니다. 기본적으로 `5400` port로 수신하며 통신은 TCP로 하기 때문에 해당 port에 대한 방화벽을 해제하여야 합니다. +
+
+license 는 PostgreSQL의 license를 사용합니다.
+
+== 설치
+- postgresql repository 추가
+[source,bash]
+yum install -y https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+
+- bgw_replstatus PostgreSQL 버전에 따라 설치 +
+14버전은 패키지 이름에 '_'가 붙는 것에 주의합니다.
+ * bgw_replstatus11.x86_64
+ * bgw_replstatus10.x86_64
+ * bgw_replstatus12.x86_64
+ * bgw_replstatus13.x86_64
+ * bgw_replstatus_14.x86_64
+[source,bash]
+yum install bgw_replstatus_14
+
+- postgresql 서버 정지
+[source,bash]
+pg_ctl stop
+
+- postgresql.conf에 추가
+[source,bash]
+shared_preload_libraries = 'bgw_replstatus'
+
+ * (선택) port 변경 +
+  1024이상의 모든 TCP 포트에서 가능합니다. 하지만 PostgreSQL의 포트와 중복되서는 안됩니다. 해당 파라미터는 서버가 재시작되어야만 설정 가능합니다. +
+[source,bash]
+bgw_replstatus.port=5401
+
+ * (선택) binding IP 변경 +
+소켓을 변경하여 특정 IP로 변경하기 위해 사용합니다. 해당 파라미터는 서버가 재시작되어야만 설정 가능합니다. 
+[source,bash]
+bgw_replstatus.bind=192.168.1.8
+
+- postgresql 서버 시작
+[source,bash]
+pg_ctl start
+
+
+
+== 테스트
+
+1. primary서버와 standby서버를 설정합니다.
+
+2. 각 노드에 bgw_replstatus를 설치합니다.
+
+3. telnet 또는 nc로 5400 포트에 요청을 보냅니다.
+각 서버에서 `MASTER` , `STADNBY` 결과를 받을 수 있습니다.
+- Primary 서버
+[source,bash]
+[root@server-TEST1 ~]# telnet localhost 5400
+Trying ::1...
+telnet: connect to address ::1: Connection refused
+Trying 127.0.0.1...
+Connected to localhost.
+Escape character is '^]'.
+MASTERConnection closed by foreign host.
+
+- Standby 서버
+[source,bash]
+[root@server-TEST1 ~]# telnet 172.27.1.43 5400
+Trying 172.27.1.43...
+Connected to 172.27.1.43.
+Escape character is '^]'.
+STANDBYConnection closed by foreign host

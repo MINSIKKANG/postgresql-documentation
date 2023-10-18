@@ -1,0 +1,221 @@
+= cube
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== cube 설명
+cube는 다차원 큐브를 나타내는 데이터 유형을 구현합니다.
+
+* syntex
+
+x -	1차원 점(또는 길이가 0인 1차원 간격) +
+(x)	- 위와 동일 +
+x1,x2,...,xn - 내부적으로 부피가 0인 큐브로 표현되는 n차원 공간의 한 점 +
+(x1,x2,...,xn) - 위와 동일 +
+(x),(y)	- x에서 시작해서 끝나는 1차원 간격 y(반대 순서 상관 없음) +
+[(x),(y)] - 위와 동일 +
+(x1,...,xn),(y1,...,yn)	- 대각선으로 마주보는 한 쌍의 모서리로 표현되는 n차원 정육면체 +
+[(x1,...,xn),(y1,...,yn)] - 위와 동일
+
+큐브의 반대 쪽 모서리가 입력되는 순서는 중요하지 않습니다(cube 내부에서 필요시 자동변환). 모서리가 일치하면 공간 낭비를 피하기 위해 "is point" 플래그와 함께 하나의 모서리만 저장합니다.
+
+* precision
+
+값은 내부적으로 64비트 부동 소수점 숫자로 저장됩니다. 유효 숫자가 16개 이상인 숫자는 잘립니다.
+
+* 제공되는 연산자
+
+cube && cube returns boolean - 큐브가 겹치는지 확인합니다.
+
+cube @> cube returns boolean - 첫번째 큐브에 두번째 큐브가 포함되어 있는지 확인합니다.
+
+cube <@ cube returns boolean - 첫번째 큐브가 두번째 큐브에 포함되어 있는지 확인합니다.
+
+cube -> integer returns float8 - 큐브의 n-번째 좌표를 추출합니다.(1부터 계산)
+
+cube ~> integer returns float8 - 다음과 같이 계산하여 큐브의 n-번째 좌표를 추출합니다. +
+n = 2 * k - 1 : k-번째 차원의 하한 +
+n = 2 * k : 차원 k-의 상한을 의미 +
+음수 n은 해당 양수 좌표의 역 값을 나타냅니다. 이는 KNN-GiST 지원을 위해 설계되었습니다.
+
+cube <-> cube returns float8 - 두 큐브 사이의 유클리드 거리를 계산합니다.
+
+cube <#> cube returns float8 - 두 튜브 사이의 택시(L-1미터법) 거리를 계산합니다.
+
+cube <=> cube returns float8 - 두 큐브 사이의 체바쇼프(L-inf미터법) 거리를 계산합니다.
+
+이 외에도 일반 비교연산자를 type에 사용할 수 있습니다. 또한 GiST 인덱스 연산자 클래스도 제공합니다.
+
+* 제공되는 함수
+
+cube ( float8 ) returns cube - 두 좌표가 동일한 1차원 정육면체를 만듭니다. +
+예) cube(1) returns (1)
+
+cube ( float8, float8 ) returns cube - 1차원 큐브를 만듭니다. +
+예) cube(1, 2) returns (1),(2)
+
+cube ( float8[] ) returns cube - 배열에 의해 정의된 좌표를 사용하여 부피가 0인 큐브를 만듭니다. +
+예) cube(ARRAY[1,2,3]) returns (1, 2, 3)
+
+cube ( float8[], float8[] ) returns cube - 길이가 같아야 하는 두 배열에 의해 정의된 대로 오른쪽 위 및 왼쪽 아래 좌표로 큐브를 만듭니다. +
+예) cube(ARRAY[1,2], ARRAY[3,4]) returns (1, 2),(3, 4)
+
+cube ( cube, float8 ) returns cube - 새 좌표의 두 끝점에 대해 동일한 값을 사용하여 기존 큐브에 차원을 추가하여 새 큐브를 만듭니다. 계산된 값에서 큐브를 하나씩 구성하는 데 유용합니다. +
+예) cube('(1,2),(3,4)'::cube, 5) returns (1, 2, 5),(3, 4, 5)
+
+cube ( cube, float8, float8 ) returns cube - 기존 큐브에 차원을 추가하여 새 큐브를 만듭니다. 계산된 값에서 큐브를 하나씩 구성하는 데 유용합니다. +
+예) cube('(1,2),(3,4)'::cube, 5, 6) returns (1, 2, 5),(3, 4, 6)
+
+cube_dim ( cube ) returns integer - 큐브의 차원의 수를 반환합니다.
+예) cube_dim('(1,2),(3,4)') returns 2
+
+cube_ll_coord ( cube, integer ) returns float8 - 큐브의 왼쪽 아래 모서리에 대한 n-번째 좌표 값을 반환합니다.
+예) cube_ll_coord('(1,2),(3,4)', 2) returns 2
+
+cube_ur_coord ( cube, integer ) returns float8 - 큐브의 오른쪽 위 모서리에 대한 n-번째 좌표 값을 반환합니다. +
+예) cube_ur_coord('(1,2),(3,4)', 2) returns 4
+
+cube_is_point ( cube ) returns boolean - 큐브가 점인 경우, true를 반환합니다.(두 모서리가 동일한 경우) +
+예) cube_is_point(cube(1,1)) returns t
+
+cube_distance ( cube, cube ) returns float8 - 두 큐브 사이의 거리를 반환합니다. 두 큐브가 모두 점인 경우 이는 일반 거리 함수입니다. +
+예) cube_distance('(1,2)', '(3,4)') returns 2.8284271247461903
+
+cube_subset ( cube, integer[] ) returns cube - 배열의 차원 인덱스 목록을 사용하여 기존 큐브에서 새 큐브를 만듭니다. 단일 차원의 끝점을 추출하거나 차원을 삭제하거나 원하는 대로 재정렬하는 데 사용할 수 있습니다. +
+예)cube_subset(cube('(1,3,5),(6,7,8)'), ARRAY[2]) returns (3),(7) +
+cube_subset(cube('(1,3,5),(6,7,8)'), ARRAY[3,2,1,1]) returns (5, 3, 1, 1),(8, 7, 6, 6)
+
+cube_union ( cube, cube ) returns cube - 두 큐브의 합집합을 생성합니다. +
+예) cube_union('(1,2)', '(3,4)') returns (1, 2),(3, 4)
+
+cube_inter ( cube, cube ) returns cube - 두 큐브의 교차점을 생성합니다. +
+예) cube_inter('(1,2)', '(3,4)') returns (3, 4),(1, 2)
+
+cube_enlarge ( c cube, r double, n integer ) returns cube - 최소한 n차원에서 지정된 반지름 r 만큼 큐브 크기를 늘립니다. 반지름이 음수면 큐브가 대신 축소됩니다. 정의된 모든 치수는 반경에 의해 변경됩니다. 왼쪽 아래 좌표는 r만큼 감소하고, 오른쪽 위 좌표는 r만큼 증가합니다. 왼쪽 아래 좌표가 해당하는 오른쪽 위 좌표(r<0 인경우에만 발생)이상으로 증가하면 두 좌표 모두 평균으로 설정 됩니다. n이 정의된 차원 수 보다 크고 큐브가 확대되는 경우(r > 0) n차원이 추가됩니다. 0은 추가 좌표의 초기값으로 사용됩니다. 이 기능은 가까운 점을 검색하기 위해 점 주위에 경계 상자를 만드는데 유용합니다. +
+예) cube_enlarge('(1,2),(3,4)', 0.5, 3) returns (0.5, 1.5, -0.5),(3.5, 4.5, 0.5)
+
+== cube 예시
+cube에서 제공하는 연산자와 함수를 사용하는 예시입니다.
+[source, sql]
+----
+SELECT '1'::cube AS cube;
+ cube 
+------
+ (1)
+(1 row)
+
+SELECT '-1'::cube AS cube;
+ cube 
+------
+ (-1)
+(1 row)
+
+SELECT '(0),(0)'::cube AS cube;
+ cube 
+------
+ (0)
+(1 row)
+
+SELECT '(0),(1)'::cube AS cube;
+  cube   
+---------
+ (0),(1)
+(1 row)
+
+SELECT '[(0,0,0,0),(0,0,0,0)]'::cube AS cube;
+     cube     
+--------------
+ (0, 0, 0, 0)
+(1 row)
+
+SELECT cube(cube(1,2),3);
+     cube      
+---------------
+ (1, 3),(2, 3)
+(1 row)
+
+SELECT cube_subset(cube('(1,3,5),(6,7,8)'), ARRAY[3,2,1,1]);
+        cube_subset        
+---------------------------
+ (5, 3, 1, 1),(8, 7, 6, 6)
+(1 row)
+
+SELECT cube('(1,2),(1,2)'); -- cube_in
+  cube  
+--------
+ (1, 2)
+(1 row)
+
+SELECT '24, 33.20'::cube = '24, 33.20'::cube AS bool;
+ bool 
+------
+ t
+(1 row)
+
+SELECT '0,0,1'::cube @> '0,0,0'::cube AS bool;
+ bool 
+------
+ f
+(1 row)
+
+SELECT cube_distance('(0)'::cube,'(2,2,2,2)'::cube);
+ cube_distance 
+---------------
+             4
+(1 row)
+
+SELECT cube_dim('(0)'::cube);
+ cube_dim 
+----------
+        1
+(1 row)
+
+SELECT cube_ll_coord('(-1,1),(2,-2)'::cube, 1);
+ cube_ll_coord 
+---------------
+            -1
+(1 row)
+
+SELECT cube_ur_coord('(-1,1),(2,-2)'::cube, 1);
+ cube_ur_coord 
+---------------
+             2
+(1 row)
+
+SELECT cube_is_point('(0)'::cube);
+ cube_is_point 
+---------------
+ t
+(1 row)
+
+SELECT cube_enlarge('(0)'::cube, 0, 0);
+ cube_enlarge 
+--------------
+ (0)
+(1 row)
+
+SELECT cube_union('(1,2),(3,4)'::cube, '(5,6,7),(8,9,10)'::cube);
+      cube_union      
+----------------------
+ (1, 2, 0),(8, 9, 10)
+(1 row)
+
+SELECT cube_inter('(1,2),(10,11)'::cube, '(3,4), (16,15)'::cube); -- intersects
+   cube_inter    
+-----------------
+ (3, 4),(10, 11)
+(1 row)
+
+SELECT distance_taxicab('(2,2),(10,10)'::cube, '(0,0),(5,5)'::cube);
+ distance_taxicab 
+------------------
+                0
+(1 row)
+
+SELECT distance_chebyshev('(2,2),(10,10)'::cube, '(0,0),(5,5)'::cube);
+ distance_chebyshev 
+--------------------
+                  0
+(1 row)
+----

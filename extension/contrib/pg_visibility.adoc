@@ -1,0 +1,66 @@
+= pg_visibility
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== pg_visibility 설명
+VM(visibility map - 테이블을 구성하는 개별 페이지의 상태를 2개의 bit값으로 표현하는 메타정보 파일, tuple들의 상태 정보를 축약해서 담고있음) 파일의 2bit값의 변화를 확인할 수 있는 extension입니다. vm 파일은 relation OID에 해당하는 숫자의 끝에 _VM을 붙인 형태로 관리되며 VACUUM 또는 VACUUM FREEZE와 같은 명시적인 vacuum 작업을 수행하거나, autovacuum launcher process에 의해 autovacuum이 수행될 때에도 갱신됩니다. +
+postgresql은 index only scan을 유도하기 위해서 적절한 구성을 했더라도, table look-up이 발생할 수 있는데, 이는 읽어야하는 row인지를 판단할 정보가 index 자체에 없기 때문입니다. 이러한 문제를 피하기 위해서 sql 수행 시점에 VM의 ALL_VISIBLE 값을 확인해서 Table look-up 여부를 결정하게 됩니다.
+function은 아래와 같습니다.
+
+* pg_visibility_map(relation regclass, blkno bigint, all_visible OUT boolean, all_frozen OUT boolean) returns record +
+주어진 relation의 block에 대한 VM의 모든 표시 및 고정 비트를 반환합니다.
+
+* pg_visibility(relation regclass, blkno bigint, all_visible OUT boolean, all_frozen OUT boolean, pd_all_visible OUT boolean) returns record +
+주어진 relation의 block에 대한 VM의 모든 표시 및 고정 비트와 해당 블록의 비트를 반환합니다.
+
+* pg_visibility_map(relation regclass, blkno OUT bigint, all_visible OUT boolean, all_frozen OUT boolean) returns setof record +
+주어진 relation의 각 block에 대한 VM의 모든 표시 및 고정 비트를 반환합니다.
+
+* pg_visibility(relation regclass, blkno OUT bigint, all_visible OUT boolean, all_frozen OUT boolean, pd_all_visible OUT boolean) returns setof record +
+주어진 relation의 각 block에 대한 VM의 모든 표시 및 고정 비트와 각 블록의 비트를 반환합니다.
+
+* pg_visibility_map_summary(relation regclass, all_visible OUT bigint, all_frozen OUT bigint) returns record +
+VM에 따라 relation에서 모두 표시되는 페이지 수와 완전히 고정된 페이지 수를 반환합니다.
+
+* pg_check_frozen(relation regclass, t_ctid OUT tid) returns setof tid +
+VM에서 모두 고정으로 표시된 페이지에 저장된 고정되지 않은 tuple의 TID를 반환합니다. 이 함수가 비어있지 않은 TID 집합을 반환하면 VM이 손상된 것입니다.
+
+* pg_check_visible(relation regclass, t_ctid OUT tid) returns setof tid +
+VM에서 모두 볼 수 있는 것으로 표시된 페이지에 저장된 모두 볼 수 없는 tuple의 TID를 반환합니다. 이 함수가 비어있지 않은 TID 집합을 반환하면 VM이 손상된 것입니다.
+
+* pg_truncate_visibility_map(relation regclass) returns void +
+주어진 relation에 대한 VM을 자릅니다. 이 기능은 relation에 대한 VM이 손상되었다고 판단하고 강제로 다시 작성하려는 경우에 유용합니다.
+
+== pg_visibility 예시
+테이블을 생성하고 샘플데이터를 넣은 후 pg_visibility 함수를 이용해 vacuum freeze 전 후를 비교하는 예시입니다.
+[source, sql]
+----
+create table test_vm (col integer);
+insert into test_vm select generate_series(1,1001) as col;
+
+select * from pg_visibility('test_vm');
+ blkno | all_visible | all_frozen | pd_all_visible 
+-------+-------------+------------+----------------
+     0 | f           | f          | f
+     1 | f           | f          | f
+     2 | f           | f          | f
+     3 | f           | f          | f
+     4 | f           | f          | f
+(5 rows)
+
+vacuum freeze test_vm;
+--freeze 작업 수행
+
+select * from pg_visibility('test_vm');
+ blkno | all_visible | all_frozen | pd_all_visible 
+-------+-------------+------------+----------------
+     0 | t           | t          | t
+     1 | t           | t          | t
+     2 | t           | t          | t
+     3 | t           | t          | t
+     4 | t           | t          | t
+(5 rows)
+
+----

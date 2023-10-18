@@ -1,0 +1,146 @@
+= bloom
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== bloom 설명
+bloom 필터를 기반으로 하는 인덱스 액세스 방법을 제공합니다. bloom 필터란 구성요소가 집합의 구성원인지 여부를 테스트하는데 사용되는 공간 효율적인 데이터 구조입니다.
+이 유형의 인덱스는 테이블에 많은 속성이 있고, 쿼리가 속성의 임의 조합을 테스트할 때 가장 유용합니다. btree 인덱스가 bloom보다 빠르지만, 단일 bloom 인덱스만 필요한 쿼리를 지원하려면 많은 btree가 필요할 수 있습니다.
+
+bloom 인덱스는 with 절에서 다음 매개변수를 허용합니다. +
+length - 각 색인 항목의 길이(bit단위)입니다. 16의 가장 가까운 배수로 반올림됩니다. default값은 80, max 값은  4096 입니다. +
+
+col1 ~ col32
+각 인덱스 컬럼에 대해 생성된 비트 수 입니다. 각 매개변수의 이름은 해당 매개변수가 제어하는 인덱스 열의 번호입니다. default 값은 2bit이고 max 값은 4095 입니다. 실제로 사용되지 않는 인덱스 컬럼의 매개변수는 무시됩니다.
+
+또한 bloom 인덱스에 대한 연산자 클래스는 인덱싱된 데이터 유형에 대한 해시함수와, 검색을 위한 등호 연산자만 필요합니다.
+
+== bloom 예시
+간단하게 bloom인덱스를 생성하는 예시와 임의의 테이블로 bloom 인덱스를 사용하기 좋은 상황의 예시입니다.
+
+bloom 인덱스 생성 예시 구문
+[source, sql]
+----
+CREATE INDEX bloomidx ON tbloom USING bloom (i1,i2,i3)
+       WITH (length=80, col1=2, col2=2, col3=4);
+--index는 80 bit의 길이로 생성되며 속성 i1 및 i2는 2bit, i3은 4bit에 매핑됩니다.
+--default 값은 생략 가능합니다.
+----
+
+bloom 인덱스 사용예시 및 btree 인덱스를 사용할 경우보다 더 성능이 나오는 예시입니다.
+
+[source, sql]
+----
+CREATE TABLE tbloom AS
+   SELECT
+     (random() * 1000000)::int as i1,
+     (random() * 1000000)::int as i2,
+     (random() * 1000000)::int as i3,
+     (random() * 1000000)::int as i4,
+     (random() * 1000000)::int as i5,
+     (random() * 1000000)::int as i6
+   FROM
+  generate_series(1,10000000);
+SELECT 10000000
+----
+
+해당 테이블 생성 후 실행계획
+[source, sql]
+----
+EXPLAIN ANALYZE SELECT * FROM tbloom WHERE i2 = 898732 AND i5 = 123451;
+                                              QUERY PLAN                                              
+-------------------------------------------------------------------​-----------------------------------
+ Seq Scan on tbloom  (cost=0.00..2137.14 rows=3 width=24) (actual time=16.971..16.971 rows=0 loops=1)
+   Filter: ((i2 = 898732) AND (i5 = 123451))
+   Rows Removed by Filter: 100000
+ Planning Time: 0.346 ms
+ Execution Time: 16.988 ms
+(5 rows)
+----
+
+btree 인덱스 생성 후 index 크기와 실행계획
+[source, sql]
+----
+CREATE INDEX btreeidx ON tbloom (i1, i2, i3, i4, i5, i6);
+CREATE INDEX
+
+SELECT pg_size_pretty(pg_relation_size('btreeidx'));
+ pg_size_pretty
+----------------
+ 3976 kB
+(1 row)
+
+EXPLAIN ANALYZE SELECT * FROM tbloom WHERE i2 = 898732 AND i5 = 123451;
+                                              QUERY PLAN                                              
+-------------------------------------------------------------------​-----------------------------------
+ Seq Scan on tbloom  (cost=0.00..2137.00 rows=2 width=24) (actual time=12.805..12.805 rows=0 loops=1)
+   Filter: ((i2 = 898732) AND (i5 = 123451))
+   Rows Removed by Filter: 100000
+ Planning Time: 0.138 ms
+ Execution Time: 12.817 ms
+(5 rows)
+----
+
+bloom 인덱스 생성 후 index 크기와 실행계획
+[source, sql]
+----
+CREATE INDEX bloomidx ON tbloom USING bloom (i1, i2, i3, i4, i5, i6);
+CREATE INDEX
+
+SELECT pg_size_pretty(pg_relation_size('bloomidx'));
+ pg_size_pretty
+----------------
+ 1584 kB
+(1 row)
+
+EXPLAIN ANALYZE SELECT * FROM tbloom WHERE i2 = 898732 AND i5 = 123451;
+                                                     QUERY PLAN                                                      
+-------------------------------------------------------------------​--------------------------------------------------
+ Bitmap Heap Scan on tbloom  (cost=1792.00..1799.69 rows=2 width=24) (actual time=0.388..0.388 rows=0 loops=1)
+   Recheck Cond: ((i2 = 898732) AND (i5 = 123451))
+   Rows Removed by Index Recheck: 29
+   Heap Blocks: exact=28
+   ->  Bitmap Index Scan on bloomidx  (cost=0.00..1792.00 rows=2 width=0) (actual time=0.356..0.356 rows=29 loops=1)
+         Index Cond: ((i2 = 898732) AND (i5 = 123451))
+ Planning Time: 0.099 ms
+ Execution Time: 0.408 ms
+(8 rows)
+----
+
+btree의 성능을 높이려면 아래와 같이 각 컬럼에 대해 인덱스를 별도로 생성해야합니다.
+[source, sql]
+----
+CREATE INDEX btreeidx1 ON tbloom (i1);
+CREATE INDEX
+CREATE INDEX btreeidx2 ON tbloom (i2);
+CREATE INDEX
+CREATE INDEX btreeidx3 ON tbloom (i3);
+CREATE INDEX
+...
+CREATE INDEX btreeidx6 ON tbloom (i6);
+CREATE INDEX
+EXPLAIN ANALYZE SELECT * FROM tbloom WHERE i2 = 898732 AND i5 = 123451;
+                                                        QUERY PLAN                                                         
+-------------------------------------------------------------------​--------------------------------------------------------
+ Bitmap Heap Scan on tbloom  (cost=24.34..32.03 rows=2 width=24) (actual time=0.028..0.029 rows=0 loops=1)
+   Recheck Cond: ((i5 = 123451) AND (i2 = 898732))
+   ->  BitmapAnd  (cost=24.34..24.34 rows=2 width=0) (actual time=0.027..0.027 rows=0 loops=1)
+         ->  Bitmap Index Scan on btreeidx5  (cost=0.00..12.04 rows=500 width=0) (actual time=0.026..0.026 rows=0 loops=1)
+               Index Cond: (i5 = 123451)
+         ->  Bitmap Index Scan on btreeidx2  (cost=0.00..12.04 rows=500 width=0) (never executed)
+               Index Cond: (i2 = 898732)
+ Planning Time: 0.491 ms
+ Execution Time: 0.055 ms
+(9 rows)
+----
+성능은 확실하게 나오지만, 인덱스 사이즈가 너무 커져서(각 컬럼별 인덱스마다 2MB) bloom을 사용할 경우보다 8배의 공간을 차지하게 됩니다.
+
+text 데이터 유형에 대한 연산자 클래스 정의 예시
+[source, sql]
+----
+CREATE OPERATOR CLASS text_ops
+DEFAULT FOR TYPE text USING bloom AS
+    OPERATOR    1   =(text, text),
+    FUNCTION    1   hashtext(text);
+----

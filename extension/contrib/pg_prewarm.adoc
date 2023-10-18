@@ -1,0 +1,84 @@
+= pg_prewarm
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== pg_prewarm 설명
+pg_prewarm은 관계 데이터를 운영 체제 버퍼 캐시나 PostgreSQL 버퍼 캐시에 로드하는 편리한 방법을 제공합니다. 함수를 사용하여 수동으로 수행하거나 shared_preload_libraries에 포함하여 자동으로 수행할 수 있습니다. 후자의 경우 시스템은 autoprewarm.blocks라는 파일에 공유 버퍼의 내용을 주기적으로 기록하는 background worker 를 실행하고, 2개의 background worker를 사용하여 다시 시작한 후 동일한 블록을 다시 로드합니다.
+
+*제공되는 함수*
+
+* pg_prewarm(regclass, mode text default 'buffer', fork text default 'main',
+           first_block int8 default null,
+           last_block int8 default null) RETURNS int8
+
+첫번째 인수는 예열(prewarm)이 될 relation입니다. 두번째 인수는 사용할 예열 방법입니다. 세번째 인수는 예열될 realtion 포크로 일반적으로 main입니다. 네번째 인수는 예열할 첫번째 블록 번호입니다(0의 동의어로 null 허용). 다섯번째 인수는 예열할 마지막 블록 번호입니다(NULL은 relation의 마지막 블록을 통해 예열함을 의미함). 반환되는 값은 미리 예열된 블록 수 입니다.
+
+두번째 인수에 들어갈 예열 방법은 3가지가 있습니다. +
+prefetch는 운영체제에 비동기 프리페치 요청을 발행하고 그렇지 않은 경우 오류를 발생시킵니다. +
+read는 요청된 블록 범위를 읽습니다. 이는 프리페치와 달리 동기식이며, 모든 플랫폼 및 빌드에서 지원되지만 더 느릴 수 있습니다. +
+buffer는 요청된 블록 범위를 데이터베이스 버퍼 캐시로 읽습니다.
+
+이 방법중 하나를 사용해서 OS에서 prefetch 또는 read를 사용할 때, postgresql에서 캐시할 수 있는 것보다 더 많은 블록을 buffer에 사전 예열하려고하면 더 높은 번호의 블록을 읽을 때 더 낮은 번호의 블록이 제거될 수 있습니다.또한 미리 예열된 데이터는 캐시 제거로부터 특별한 보호를 받지 못하므로 다른 시스템 활동이 읽은 직후 새로 미리 예열된 블록을 제거할 수 있습니다. 반대로 예열은 캐시에서 다른 데이터도 제거할 수 있습니다. 이러한 이유로 예열은 일반적으로 캐시가 거의 비어 있는 시작 시 가장 유용합니다.
+
+* autoprewarm_start_worker() RETURNS void
+
+기본 autoprewarm worker를 시작합니다. 이는 일반적으로 자동으로 실행되지만, 서버 시작 시 autoprewarm이 구성되지 않았고, 나중에 worker를 시작하려는 경우에 유용합니다.
+
+* autoprewarm_dump_now() RETURNS int8
+
+autoprewarm.blocks 파일을 즉시 업데이트 합니다. 이는 autoprewarm worker가 실행되고 있지 않지만, 다음에 다시 시작한 후에 실행할 것으로 예상되는 경우에 유용할 수 있습니다. 반환 값은 autoprewarm.blocks에 기록된 레코드 수입니다.
+
+*제공되는 매개변수(postgresql.conf)*
+
+* pg_prewarm.autoprewarm (boolean)
+
+서버가 autoprewarm worker를 실행해야하는지 여부를 제어합니다. default는 true이고 이 매개변수는 서버 시작시에만 설정할 수 있습니다.
+
+* pg_prewarm.autoprewarm_interval (int)
+
+autoprewarm.blocks에 대한 업데이트 간격 입니다. default는 300이고 단위는 second입니다. 0으로 설정하면 파일이 일정한 간격으로 dump 되지 않고, 서버가 종료될 때만 dump 됩니다.
+
+== pg_prewarm 예시
+autoprewarm을 위해 postgresql.conf에 세팅하는 값과, 세팅 후 재 시작시 보이는 프로세스에 대한 예시입니다.
+
+[source, sh]
+----
+postgresql.conf
+shared_preload_libraries = 'pg_prewarm'
+
+pg_prewarm.autoprewarm = true
+pg_prewarm.autoprewarm_interval = 300s
+----
+
+세팅 전 프로세스
+[source, bash]
+----
+[hypersql@localhost:~]$ ps -ef |grep postgres
+hypersql   58277       1  0 Sep23 ?        00:00:09 /usr/pgsql-14/bin/postgres -D /hypersql/pg/14/data
+hypersql   58278   58277  0 Sep23 ?        00:00:00 postgres: logger 
+hypersql   58280   58277  0 Sep23 ?        00:00:04 postgres: checkpointer 
+hypersql   58281   58277  0 Sep23 ?        00:00:03 postgres: background writer 
+hypersql   58282   58277  0 Sep23 ?        00:00:08 postgres: walwriter 
+hypersql   58283   58277  0 Sep23 ?        00:00:06 postgres: autovacuum launcher 
+hypersql   58284   58277  0 Sep23 ?        00:00:01 postgres: archiver
+hypersql   58285   58277  0 Sep23 ?        00:00:21 postgres: stats collector 
+hypersql   58286   58277  0 Sep23 ?        00:00:00 postgres: logical replication launcher 
+----
+
+세팅 후 프로세스
+[source, bash]
+----
+[hypersql@localhost:data]$ ps -ef |grep postgres
+hypersql   81895       1  1 01:08 ?        00:00:00 /usr/pgsql-14/bin/postgres -D /hypersql/pg/14/data
+hypersql   81896   81895  0 01:08 ?        00:00:00 postgres: logger 
+hypersql   81898   81895  0 01:08 ?        00:00:00 postgres: checkpointer 
+hypersql   81899   81895  0 01:08 ?        00:00:00 postgres: background writer 
+hypersql   81900   81895  0 01:08 ?        00:00:00 postgres: walwriter 
+hypersql   81901   81895  0 01:08 ?        00:00:00 postgres: autovacuum launcher 
+hypersql   81902   81895  0 01:08 ?        00:00:00 postgres: archiver 
+hypersql   81903   81895  0 01:08 ?        00:00:00 postgres: stats collector 
+*hypersql   81904   81895  0 01:08 ?        00:00:00 postgres: autoprewarm leader*
+hypersql   81905   81895  0 01:08 ?        00:00:00 postgres: logical replication launcher 
+----

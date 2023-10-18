@@ -1,0 +1,122 @@
+= pg_buffercache
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== pg_buffercache 설명
+실시간으로 shared buffer cache에서 일어나는 일을 pg_buffercache 라는 view 형태로 아래 row를 제공합니다.
+
+* pg_buffercache 내용
+
+bufferid - integer +
+-> ID, 범위 1..shared_buffers
+
+relfilenode - oid +
+-> 참조 pg_class. relfilenode
+
+reltablespace - oid +
+-> 참조 pg_tablespace. oid
+
+reldatabase - oid +
+-> 참조 pg_database. oid
+
+relforknumber - smallint +
+-> relation 내의 포크 번호
+
+relblocknumber - bigint +
+-> relation 내 페이지 번호
+
+isdirty - boolean +
+-> 페이지 dirty 여부 확인
+
+usagecount - smallint +
+-> 클록 스윕 액세스 수
+
+pinning_backends - integer +
+-> 이 버퍼를 고정하는 백엔드 수
+
+
+ 
+select count(*) from pg_buffercache;
+
+select setting from pg_settings where name = 'shared_buffers'
+
+의 결과 값(buffer 페이지 수)이 같게 나오므로, 시스템 카탈로그와의 join을 통해 relation 별로 shared buffer 사용 현황을 확인 할 수 있습니다.
+
+
+== 사용 예시
+
+pg_class 및 pg_database, pg_namespace와의 join을 통해, shared buffer를 점유하는 top 20 relation을 확인하는 쿼리 예시입니다.
+
+[source, sql]
+----
+with
+all_tables as -- 총 shared buffer 사이즈를 보여주는 부분
+(
+SELECT
+        *
+FROM (
+SELECT
+        'all_nsp' AS nspname,
+        'all_rel' AS relname,
+        pg_size_pretty(count(*) * 8192) AS buffer_size -- pg_size_pretty를 이용해 페이지 수 -> Byte 단위로 치환
+FROM pg_buffercache
+)a),
+tables as -- relation 별 shared buffer 사이즈를 보여주는 부분
+(
+SELECT
+        *
+FROM (
+SELECT n.nspname as nspname, c.relname as relname, pg_size_pretty(count(*) * 8192) AS buffer_size 
+-- pg_size_pretty를 이용해 페이지 수 -> Byte 단위로 치환
+FROM pg_buffercache b 
+JOIN pg_class c ON b.relfilenode = pg_relation_filenode(c.oid) AND
+     b.reldatabase IN (0, (SELECT oid 
+		                   FROM pg_database
+                           WHERE datname = current_database()))
+JOIN pg_namespace n ON n.oid = c.relnamespace
+GROUP BY nspname, relname
+ORDER BY count(*) DESC
+limit 20
+)a)
+SELECT
+        nspname as nspname,
+        relname as relname,
+        buffer_size as buffer_size
+FROM
+        (SELECT * 
+         FROM all_tables 
+         UNION ALL 
+         SELECT * FROM tables) a
+;
+----
+
+결과 예시
+[source, sql]
+----
+  nspname   |             relname             | buffer_size 
+------------+---------------------------------+-------------
+ all_nsp    | all_rel                         | 128 MB
+ pg_catalog | pg_proc                         | 1472 kB
+ pg_catalog | pg_attribute                    | 544 kB
+ pg_catalog | pg_depend_reference_index       | 200 kB
+ pg_catalog | pg_class                        | 176 kB
+ pg_catalog | pg_statistic                    | 160 kB
+ pg_catalog | pg_operator                     | 152 kB
+ pg_catalog | pg_proc_proname_args_nsp_index  | 152 kB
+ pg_catalog | pg_depend                       | 136 kB
+ pg_catalog | pg_depend_depender_index        | 112 kB
+ pg_catalog | pg_attribute_relid_attnum_index | 112 kB
+ pg_catalog | pg_proc_oid_index               | 88 kB
+ pg_catalog | pg_amop                         | 64 kB
+ pg_catalog | pg_class_relname_nsp_index      | 64 kB
+ pg_catalog | pg_amproc                       | 64 kB
+ pg_catalog | pg_constraint                   | 64 kB
+ pg_catalog | pg_index                        | 64 kB
+ pg_toast   | pg_toast_2618                   | 56 kB
+ pg_catalog | pg_rewrite                      | 56 kB
+ pg_catalog | pg_type                         | 56 kB
+ pg_catalog | pg_opclass                      | 56 kB
+(21 rows)
+----

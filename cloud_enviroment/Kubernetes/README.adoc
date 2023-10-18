@@ -1,0 +1,96 @@
+= PostgreSQL Kubernetes
+:toc:
+:toc-title:
+:table-caption!:
+:sectnums:
+
+== Kubernetes 버전 선택
+- skew 정책에 맞는 버전 선택
+- 현재 작성날짜(22.05.12기준) 1.24 release, 1.21까지 지원 가능
+
+
+== docker 설치
+docker의 최신버전을 받기 위해서 repository를 가져옵니다.
+-----
+yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+-----
+
+그리고 yum을 통해 docker를 설치해줍니다.
+-----
+yum install docker-ce
+-----
+== Kubernetes 설치
+docker 환경이 구축되어 있다는 전제하에 진행됩니다.
+
+
+- minikube 설치 참고
+https://minikube.sigs.k8s.io/docs/start/
+
+1. 환경 설정
+- swap 비활성화
+[source, bash]
+swapoff -a && sed -i '/ swap / s/^/#/' /etc/fstab
+
+- 방화벽 기능 해제 (선택)
+[source, bash]
+systemctl disable firewalld
+systemctl stop firewalld
+
+- docker 활성화
+[source, bash]
+systemctl enable docker && systemctl start docker
+
+
+[source, bash]
+yum update
+
+=== kubernetes 설치
+- kubernetes repository 설정
+[source, bash]
+cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://packages.cloud.google.com/yum/doc/yum-key.gpg \
+https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+EOF
+
+ * gpg-key 오류 시 +
+    `repo_gpgcheck=0` 으로 수정
+ * yum update +
+[source, bash]
+yum install -y kubelet-1.22.0-0.x86_64 kubeadm-1.22.0-0.x86_64 kubectl-1.22.0-0.x86_64
+
+=== minikube 설치 (minikube로 설치하고 싶을 경우)
+
+- kubectl 설치
+[source,bash]
+-----
+curl -LO https://storage.googleapis.com/kubernetes-release/release/`curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt`/bin/linux/amd64/kubectl
+chmod +x ./kubectl
+mv ./kubectl /usr/local/bin/kubectl
+-----
+
+- minikube 설치
+[source, bash]
+-----
+curl -Lo minikube https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+chmod +x minikube
+install minikube /usr/local/bin/
+yum install conntrack
+-----
+
+- user 생성 후 로그인 후 minikube 실행
+docker를 특정 user에서 실행할 때 group이 반드시 docker여야합니다. `usermod` 명령어를 통해서 특정 user에게 group에 대한 권한을 부여합니다.
+[source,bash]
+-----
+adduser hypersql
+usermod -aG docker hypersql
+su - hypersql
+minikube start --vm-driver=none
+-----
+
+== Kubernetes 환경에 PostgreSQL 설치

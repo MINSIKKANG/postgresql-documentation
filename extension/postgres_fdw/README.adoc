@@ -1,0 +1,151 @@
+= postgres_fdw
+:toc:
+:toc-title:
+:table-caption!:
+:sectnums:
+
+postgres_fdw 홈페이지 : https://www.postgresql.org/docs/14/postgres-fdw.html +
+git 주소 : https://github.com/postgres/postgres/blob/master/contrib/dblink/sql/dblink.sql +
+
+== postgres_fdw 란?
+
+fdw는 Foreign Data Wrappers라고 하며 외부데이터 소스와 통신할 수 있는 PostgreSQL 데이터베이스 용 라이브러리로, 데이터 소스에 연결하고 데이터를 얻는 세부 정보를 추출하는데 사용합니다. +
+
+
+
+== 설치 요구사항
+
+* 설치 요구사항 +
+
+** PostgreSQL contrib 에 포함되어 있는 Extension +
+따로 설치 요구사항이 필요하지 않음
+
+
+== 테스트 
+
+
+EXTENSION 사용 방법 
+----
+CREATE EXTENSION [extension_name]
+----
+
+예시
+----
+$ CREATE EXTENSION postgres_fdw; 
+ERROR: permission denied to create extension "postgres_fdw"
+HINT: Must be superuser to create this extension.
+----
+postgres_fdw를 사용하기 위해서는 extension 확장하는 User에게 superuser 권한이 있어야 함.
+
+postgres_fdw 사용 방법 +
+
+외부데이터 서버 생성
+----
+/* 
+CREATE SERVER (1)
+FOREIGN DATA WRAPPER postgres_fdw
+OPTIONS (host '(2)', port '(3)', dbname '(4)');
+*/
+$ CREATE SERVER test FOREIGN DATA WRAPPER postgres_fdw OPTIONS (host '192.168.0.10', port '5432', dbname 'test');
+CREATE SERVER
+----
+. 서버명. 임의설정 
+. 원격 DB IP addr
+. 원격 DB Port
+. 원격 DB 데이터베이스 명
+
+
+
+
+사용자 매핑 설정
+----
+/* 
+CREATE USER MAPPING FOR (1)
+SERVER (2)
+OPTIONS (user '(3)', password '(4)');
+*/
+$ CREATE USER MAPPING FOR test SERVER test OPTIONS (user 'test', password '1234');
+CREATE USER MAPPING
+----
+. 현재 DB 사용자명
+. 임의 설정한 서버명
+. 원격 DB 사용자명
+. 원격 DB 사용자 비밀번호 
+
+
+
+1. 원격 테이블 생성
+----
+/* 
+CREATE FOREIGN TABLE (1) (
+(5)
+)
+SERVER (2)
+OPTIONS (schema_name '(3), table_name (4)');
+*/
+$ CREATE USER MAPPING FOR test SERVER test OPTIONS (user 'test', password '1234');
+CREATE USER MAPPING
+----
+. 사용할 테이블명
+. 임의 설정한 서버명
+. 원격 DB Schema
+. 원격 DB 테이블명
+. 원격 DB 테이블 column
+
+2. 전체 테이블 사용
+----
+/* 
+IMPORT FOREIGN SCHEMA (1) FROM SERVER (2) INTO (3);
+*/
+$ CREATE SCHEMA ms;
+CREATE SCHEMA
+$ IMPORT FOREIGN SCHEMA public FROM SERVER test INTO ms;
+IMPORT FOREIGN SCHEMA
+----
+. 원격 DB Schema
+. 임의 설정한 서버명
+. 스키마명
+
+3. 활용
+----
+/* 
+SELECT * FROM (1).(2);
+*/
+$ SELECT * FROM ms.members;
+----
+. 스키마명
+. 원격 DB 테이블명
+
+FDW Options 설정
+----
+-- updatable : 원격 테이블을 수정할 수 있도록 허용할지 여부 (IDM) (기본값 true)
+$ alter server main_server options (updatable 'true');
+ALTER SERVER
+----
+
+Server 설정 확인
+----
+$ \des+
+                                                                        List of foreign servers
+    Name | Owner | Foreign-data wrapper | Access privileges | Type | Version | FDW options | Description 
+----------+--------+-------------------------+-------------------+------+---------+---------------+-------------
+ test | test | postgres_fdw | | | | (host '192.168.0.10', port '5432', dbname 'test', updatable 'true') | 
+(1 row)
+----
+
+foreign table 변경
+----
+$ alter foreign table test.members add column memo text;
+----
+
+
+
+* 주의사항 +
+
+. postgresfdw 사용을 위해 주체가 되는 디비 유저가 superuser 권한을 가지고 있어햐 함
+
+. 외부 PostgreSQL 서버에 저장된 데이터에 액세스하는 데 사용되는 fdw +
+맨 처음 프로시저만 생성하면 일반 테이블 사용과 다르지 않음
+
+
+

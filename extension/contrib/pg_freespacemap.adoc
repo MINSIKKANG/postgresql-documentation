@@ -1,0 +1,56 @@
+= pg_freespacemap
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== pg_freespacemap 설명
+여유 공간 맵(FSM)을 검사하는 수단을 제공합니다. pg_freespace라는 두개의 오버로딩된 함수를 제공합니다. 함수는 주어진 페이지 또는 relation의 모든 페이지에 대해 여유 공간 맵에 기록된 값을 표시합니다.
+
+* pg_freespace(rel regclass IN, blkno bigint IN) returns int2
+
+    FSM에 따라 blkno로 지정된 relation 페이지의 여유 공간 양을 반환합니다.
+
+* pg_freespace(rel regclass IN, blkno OUT bigint, avail OUT int2)
+
+    FSM에 따라 relation의 각 페이지에 있는 여유 공간의 양을 표시합니다.
+
+
+== pg_freespacemap 예시
+오버로딩된 두 함수로 조회해보는 간단한 예시입니다.
+
+[source, sql]
+----
+--relation의 각 페이지에 있는 여유 공간의 양을 표시합니다.
+postgres=# SELECT * FROM pg_freespace('foo');
+ blkno | avail 
+-------+-------
+     0 |     0
+     1 |     0
+     2 |     0
+     3 |    32
+     4 |   704
+     5 |   704
+     6 |   704
+     7 |  1216
+     8 |   704
+     9 |   704
+    10 |   704
+    11 |   704
+    12 |   704
+    13 |   704
+    14 |   704
+    15 |   704
+    16 |   704
+    17 |   704
+    18 |   704
+    19 |  3648
+(20 rows)
+
+--blkno로 지정된 relation 페이지의 여유 공간 양을 반환합니다.
+postgres=# SELECT * FROM pg_freespace('foo', 7);
+ pg_freespace 
+--------------
+         1216
+(1 row)
+----

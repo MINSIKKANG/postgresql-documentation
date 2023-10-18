@@ -1,0 +1,130 @@
+= amcheck
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== amcheck 설명
+관계구조의 논리적 일관성을 확인할 수 있는 function을 제공합니다.(btree index, heap check)
+
+함수들의 return 값이 대부분 void라 에러메시지 이외에는 결과값을 확인 할 수 없는데, 
+
+set client_min_messages = DEBUG1;
+
+명령어를 통해 DEBUG 레벨(amcheck는 1~2가 적당하다고 함)을 조정하면, 세부한 내용을 확인 할 수 있습니다.
+
+- bt_index_check(index regclass, heapallindexed boolean) returns void
+
+btree index의 불변성을 조사하는 함수입니다. index이외 relation을 인자로 넣으면 index가 아니라는 에러메시지를 내보내며, heapallindexed 인자를 true로 두면, 모든 인덱스 내 튜플에 대한 check를 진행합니다. 이 함수는 사용시 AccessShareLock을 획득합니다.
+
+- bt_index_parent_check(index regclass, heapallindexed boolean, rootdescend boolean) returns void
+
+rootdescend라는 인자를 통해, leaf 레벨에서부터 각 튜플의 root page를 검사하는 기능이 추가됩니다. 이 함수 사용시 ShareLock을 획득합니다. 이 함수는 hot standby 모드가 활성화되면 사용 불가능합니다.(bt_index_check는 사용가능 함)
+
+- verify_heapam(relation regclass, on_error_stop boolean, check_toast boolean, skip text, startblock bigint, endblock bigint, blkno OUT bigint, offnum OUT integer, attnum OUT integer, msg OUT text) returns setof record
+
+relation page에 잘못된 형식의 데이터가 포함된 구조적 손상, page는 구조적으로 유효하지만 나머지 데이터베이스 클러스터와 일치하지 않는 논리적 손상이 있는지 테이블을 확인합니다. 아래와 같은 인자를 선택적으로 사용합니다.
+
+on_error_stop : true인 경우 손상이 발견된 첫 번째 블록의 끝에서 손상 검사가 중지됩니다.(default false)
+
+check_toasttrue : true인 경우 대상 관계의 TOAST 테이블에 대해 토스트된 값을 확인합니다.
+이 옵션은 성능에 영향을 미치며, toast 테이블 또는 해당 인덱스가 손상된 경우 toast 값과 비교하여 확인하면 서버가 충돌할 수 있습니다.(default false)
+
+
+skip : 유효한 옵션은 all-visible, all-frozen및 none입니다.(default none)
+
+startblock : 지정된 경우 손상 검사는 지정된 블록에서 시작하여 이전 블록을 모두 건너뜁니다. startblock대상 테이블의 블록 범위를 벗어나 지정하면 오류가 발생합니다.(default는 첫번째 블록)
+
+endblock : 지정된 경우 손상 검사는 지정된 블록에서 종료되고 나머지 블록은 모두 건너뜁니다. endblock대상 테이블의 블록 범위를 벗어나 지정하면 오류가 발생합니다.(default는 마지막 블록)
+
+※ 손상이 감지되면 다음 열이 있는 행을 반환합니다.
+
+blkno : 손상된 페이지가 포함된 블록의 번호입니다.
+
+offnum : 손상된 튜플의 OffsetNumber입니다.
+
+attnum : 손상이 전체 튜플이 아니라 열에 특정된 경우 튜플에서 손상된 열의 속성 번호입니다.
+
+msg : 감지된 문제를 설명하는 메시지입니다.
+
+
+== 사용 예시
+
+간단한 테이블을 생성해, btree index를 생성하고 각 함수를 테스트 하는 예시입니다.
+
+예시 결과는 debug 레벨을 1로 설정하여 나타납니다.
+
+[source, sql]
+----
+CREATE TABLE bttest_a(id int8);
+CREATE TABLE bttest_b(id int8);
+
+ALTER TABLE bttest_a SET (autovacuum_enabled = false);
+ALTER TABLE bttest_b SET (autovacuum_enabled = false);
+
+INSERT INTO bttest_a SELECT * FROM generate_series(1, 100000);
+INSERT INTO bttest_b SELECT * FROM generate_series(100000, 1, -1);
+
+CREATE INDEX bttest_a_idx ON bttest_a USING btree (id) WITH (deduplicate_items = ON);
+CREATE INDEX bttest_b_idx ON bttest_b USING btree (id);
+
+SELECT bt_index_check('bttest_a_idx'); -- 결과 값 void 확인
+
+SELECT bt_index_parent_check('bttest_a_idx'); -- 결과 값 void 확인
+
+set client_min_messages = DEBUG1; -- 해당 세션에서만 DEBUG level을 1로 설정
+
+SELECT bt_index_check('bttest_a_idx'); -- 결과 값 나오기 전 debug 내용 확인
+
+postgres=# SELECT bt_index_check('bttest_a_idx');
+DEBUG:  verifying consistency of tree structure for index "bttest_a_idx"
+DEBUG:  verifying level 1 (true root level)
+DEBUG:  verifying level 0 (leaf level)
+ bt_index_check 
+----------------
+ 
+(1 row)
+
+SELECT bt_index_parent_check('bttest_a_idx'); -- 결과 값 나오기 전 debug 내용 확인
+
+postgres=# SELECT bt_index_parent_check('bttest_a_idx');
+DEBUG:  verifying consistency of tree structure for index "bttest_a_idx" with cross-level checks
+DEBUG:  verifying level 1 (true root level)
+DEBUG:  verifying level 0 (leaf level)
+ bt_index_parent_check 
+-----------------------
+ 
+(1 row)
+
+----
+
+다음은 간단한 테이블을 만들고, verify_heapam에 인자를 추가해 returh 값을 확인하는 예제입니다. 예제처럼 결과값이 0으로 나와야 정상인 테이블입니다.
+
+[source, sql]
+----
+CREATE TABLE heaptest (a integer, b text);
+SELECT * FROM verify_heapam(relation := 'heaptest', skip := 'rope'); -- 오타로 인한 오류 반환
+ERROR:  invalid skip option 
+HINT:  Valid skip options are "all-visible", "all-frozen", and "none".
+
+SELECT * FROM verify_heapam(relation := 'heaptest', startblock := 0, endblock := 0);
+ blkno | offnum | attnum | msg 
+-------+--------+--------+-----
+(0 rows)
+SELECT * FROM verify_heapam(relation := 'heaptest', startblock := 5, endblock := 8);
+ blkno | offnum | attnum | msg 
+-------+--------+--------+-----
+(0 rows)
+SELECT * FROM verify_heapam(relation := 'heaptest', skip := 'none');
+ blkno | offnum | attnum | msg 
+-------+--------+--------+-----
+(0 rows)
+SELECT * FROM verify_heapam(relation := 'heaptest', skip := 'all-frozen');
+ blkno | offnum | attnum | msg 
+-------+--------+--------+-----
+(0 rows)
+SELECT * FROM verify_heapam(relation := 'heaptest', skip := 'all-visible');
+ blkno | offnum | attnum | msg 
+-------+--------+--------+-----
+(0 rows)
+----

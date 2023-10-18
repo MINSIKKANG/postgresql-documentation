@@ -1,0 +1,74 @@
+= dict_xsyn
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== dict_xsyn 설명
+dict_xsyn(Extended Synonym Dictionary)는 전체 텍스트 검색을 위한 추가 사전 템플릿의 예입니다. 이 사전 유형은 단어를 동의어 그룹으로 대체하므로 동의어를 사용하여 단어를 검색할 수 있습니다.
+
+dict_xsyn는 아래의 옵션을 사용합니다.
+
+* matchorig - 원래 단어가 사전에서 허용되는지 여부를 제어. default는 true입니다.
+
+* matchsynonyms - 동의어가 사전에서 허용되는지 여부를 제어. default는 false입니다.
+
+* keeporig - 원래 단어가 사전의 출력에 포함되는지 여부를 제어. default는 true입니다.
+
+* keepsynonyms - 동의어가 사전의 출력에 포함되는지 여부를 제어. default는 true입니다.
+
+* rules - 동의어 목록이 포함된 파일의 기본 이름입니다. 이 파일은 $SHAREDIR/tsearch_data 위치에 저장되어야합니다($SHAREDIR은 /usr/pgsql-14/share경로처럼 PostgreSQL 공유 데이터 디렉토리 입니다.). 이름은 .rules로 끝나야 합니다. rules 내용은 word syn1 syn2 syn3 와 같이 작성됩니다.
+ex)supernova sn sne 1987a
+
+== dict_xsyn 예시
+다음은 dict_xsyn 구문의 예시와 각 옵션을 활용했을 경우 결과의 예시입니다.
+
+[source,sql]
+----
+ALTER TEXT SEARCH DICTIONARY xsyn (RULES='xsyn_sample', KEEPORIG=true, MATCHORIG=true, KEEPSYNONYMS=true, MATCHSYNONYMS=false);
+
+--이미 작성된 xsyn_sample의 supernova단어에 대한 동의어들이 같이 조회됩니다.
+SELECT ts_lexize('xsyn', 'supernova');
+        ts_lexize         
+--------------------------
+ {supernova,sn,sne,1987a}
+(1 row)
+
+--matchsynonyms옵션이 false라 조회되지 않습니다.
+SELECT ts_lexize('xsyn', 'sn');
+ ts_lexize 
+-----------
+ 
+(1 row)
+
+--전혀다른 단어라 당연히 조회되지 않습니다.
+SELECT ts_lexize('xsyn', 'grb');
+ ts_lexize 
+-----------
+ 
+(1 row)
+
+--동의어만 조회됩니다.
+ALTER TEXT SEARCH DICTIONARY xsyn (RULES='xsyn_sample', KEEPORIG=false, MATCHORIG=true, KEEPSYNONYMS=true, MATCHSYNONYMS=false);
+
+SELECT ts_lexize('xsyn', 'supernova');
+   ts_lexize    
+----------------
+ {sn,sne,1987a}
+(1 row)
+
+--동의어 입력시 같이 조회됩니다. 
+ALTER TEXT SEARCH DICTIONARY xsyn (RULES='xsyn_sample', KEEPORIG=true, MATCHORIG=true, KEEPSYNONYMS=true, MATCHSYNONYMS=true);
+
+SELECT ts_lexize('xsyn', 'supernova');
+        ts_lexize         
+--------------------------
+ {supernova,sn,sne,1987a}
+(1 row)
+
+SELECT ts_lexize('xsyn', 'sn');
+        ts_lexize         
+--------------------------
+ {supernova,sn,sne,1987a}
+(1 row)
+----

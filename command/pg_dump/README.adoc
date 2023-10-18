@@ -1,0 +1,63 @@
+= pg_dump
+:toc: 
+:toc-title: 목차
+:sectlinks:
+
+== 1. pg_dump 란?
+- 공식 문서 참고 : https://www.postgresql.org/docs/current/app-pgdump.html
+
+pg_dump는 데이터베이스를 백업하기 위한 유틸리티입니다. 데이터베이스를 사용하고 있는 중이라도 일관되게 Backup을 수행합니다. (단일 데이터베이스만 수행 가능)
+
+== 2. pg_dump 옵션
+=== 기본 실행 옵션
+----
+pg_dump [connection-option] [option] [dbname]
+----
+
+=== connection 옵션
+- `-d dbname` or `--dbname=dbname` +
+데이터베이스의 이름을 지정합니다. dbname은 해당 옵션이 아니라도 첫번째 인자로 값을 주는 것과 동일합니다.
+
+- `-h host` or `--host=host` +
+호스트를 지정합니다. 값이 슬래시로 시작하면 Unix 도메인 소켓의 디렉토리로 사용합니다. Default 값은 PGHOST 환경변수에서 가져오며, 환경변수가 없다면 Unix 도메인 소켓 연결을 시도합니다.
+
+- `-p port` or `--port=port` +
+포트번호를 지정합니다.
+
+- `-U username` or `--username=username` +
+연결할 User name 입니다.
+
+- `-w` or `--no-password` +
+데이터베이스를 연결하기 전에 password 없이 명령어를 실행합니다. 해당 명령이 실행될 때 암호가 필요없다면(.pgpass) 바로 실행됩니다.
+
+- `-W` or `--password` +
+데이터베이스를 연결하기 전에 password를 물어봅니다.
+
+- `--role=rolename` +
+dump를 수행할 User의 Role을 설정합니다. pg_dump가 데이터베이스에 연결한 후에 명령을 실행하도록 설정됩니다. 만약 `-U` 로 설정된 User에 pg_dump를 실행할 권한이 없을 때 유용합니다.
+
+
+=== pg_dump 실행 옵션
+
+- `-a` or `--data-only` +
+테이블 데이터, large object, sequence 값이 dump됩니다. `--section=data` 와 유사하지만 동일하지는 않습니다.
+
+- `-F format` + 
+dump 출력 포맷을 지정합니다. 아래의 format 옵션을 갖습니다. + 
+[%header]
+|===
+|옵션|설명
+|p| plain / 일반 텍스트 SQL 스크립트를 출력합니다. -f 옵션으로 파일명을 적지 않을 경우 stdout 방식으로 출력됩니다.
+
+|c| custom / pg_restore에 적합한 사용자 지정 형식 아카이브를 출력합니다. 
+복원중에 아카이브된 항목을 수동으로 선택하고 정렬할 수 있습니다. 
+기본적으로 압축되어 있습니다.
+
+|d| directory / pg_restore에 적합한 디렉토리 형식 아카이브를 출력합니다.
+기본적으로 압축되어 있습니다.
+dump시에 병렬처리를 지원합니다.
+
+|t| tar형식은 디렉토리 형식과 유사하나, 압축을 지원하지 않습니다.
+또한 테이블 데이터 항목의 상대적 순서는 복원중에 변경할 수 없습니다.
+
+|===

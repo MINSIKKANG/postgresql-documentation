@@ -1,0 +1,175 @@
+= pg_trgm
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== pg_trgm 설명
+pg_trgm은 문자열에 대한 빠른 검색을 지원하는 인덱스 연산자 클래스 뿐 아니라 trigram matching을 기반으로 영숫자 텍스트의 유사성을 결정하기 위한 함수 및 연산자를 제공합니다. 이를 사용해서 '%문자열%' like 검색시 table full scan을 타지 않고 인덱스 스캔을 실행할 수 있습니다(단, trigram 기반이라 3글자 이상부터 인덱스 스캔이 적용됩니다). +
+
+pg_trgm은 아래의 함수를 제공합니다.
+
+* similarity( text, text) →real
+
+    두 인수가 얼마나 유사한지를 나타내는 숫자를 반환합니다. 결과의 범위는 0(두 문자열이 완전히 다름을 나타냄)에서 1(두 문자열이 동일함을 나타냄)입니다.
+
+* show_trgm( text) →text[]
+
+    주어진 문자열에 있는 모든 trigram의 배열을 반환합니다.(디버깅을 제외하고는 거의 유용하지 않습니다.)
+
+* word_similarity( text, text) →real
+
+    첫 번째 문자열의 트라이그램 집합과 두 번째 문자열의 정렬된 트라이그램 집합의 연속 범위 사이에서 가장 큰 유사성을 나타내는 숫자를 반환합니다.
+
+* strict_word_similarity( text, text) →real
+
+    word_similarity와 같지만 단어 경계와 일치하도록 범위 경계를 강제 실행합니다. 교차 단어 트라이그램이 없기 때문에 이 함수는 실제로 첫 번째 문자열과 두 번째 문자열의 단어의 연속 범위 사이에서 가장 큰 유사성을 반환합니다.
+
+* show_limit() →real
+
+    %연산자가 사용하는 현재 유사성 임계값을 반환합니다. 서로 철자가 틀리기에 충분히 유사한 것으로 간주되도록 두 단어 사이의 최소 유사성을 설정합니다.(더 이상 사용되지 않고 postgreql.conf에 pg_trgm.similarity_threshold 변수로 대체됨)
+
+* set_limit( real) →real
+
+    %연산자가 사용하는 현재 유사성 임계값을 설정합니다 . 임계값은 0과 1 사이여야 합니다(기본값은 0.3). 전달된 동일한 값을 반환합니다.(더 이상 사용되지 않고 postgreql.conf에 pg_trgm.similarity_threshold 변수로 대체됨)
+
+또한 pg_trgm은 아래의 연산자들을 제공합니다.
+
+* text % text →boolean
+
+    인수의 유사성이 pg_trgm.similarity_threshold 매개변수에 의해 설정된 현재 유사성 임계값보다 큰 경우 true를 반환 합니다.
+
+* text <% text →boolean
+
+    첫 번째 인수에 설정된 trigram과 두 번째 인수에 설정된 순서화된 trigram의 연속 범위 사이의 유사도가 pg_trgm.word_similarity_threshold 매개변수에 의해 설정된 현재 임계값보다 큰 경우 true를 반환 합니다.
+
+* text %> text →boolean
+
+    <%연산자 의 교환 연산자.
+
+* text <<% text →boolean
+
+    두 번째 인수에 단어 경계와 일치하는 순서화된 trigram 집합의 연속 범위가 있고 첫 번째 인수의 trigram 집합에 대한 유사성이 pg_trgm.strict_word_similarity_threshold 매개변수에 의해 설정된 현재 임계값보다 큰 경우 true를 반환 합니다.
+
+* text %>> text →boolean
+
+    <<%연산자 의 교환 연산자.
+
+* text <-> text →real
+
+    인수 사이의 " 거리 " , 즉 1에서 similarity()값을 뺀 값을 반환합니다.
+
+* text <<-> text →real
+
+    인수 사이의 " 거리 " , 즉 1에서 word_similarity()값을 뺀 값을 반환합니다.
+
+* text <->> text →real
+
+    <<->연산자 의 교환 연산자.
+
+* text <<<-> text →real
+
+    인수 사이의 " 거리 " , 즉 1에서 strict_word_similarity()값을 뺀 값을 반환합니다.
+
+* text <->>> text →real
+
+    <<<->연산자 의 교환 연산자.
+
+그리고 pg_trgm이 postgresql.conf에 세팅하는 매개변수는 아래와 같습니다.
+
+* pg_trgm.similarity_threshold(real)
+
+    %연산자가 사용하는 현재 유사성 임계값을 설정합니다. 임계값은 0과 1 사이여야 합니다(기본값은 0.3).
+
+* pg_trgm.word_similarity_threshold(real)
+
+    <%및 %>연산자가 사용하는 현재 단어 유사성 임계값을 설정합니다. 임계값은 0과 1 사이여야 합니다(기본값은 0.6).
+
+* pg_trgm.strict_word_similarity_threshold(real)
+
+    <<% 및 %>>연산자 가 사용하는 현재 strict 단어 유사성 임계값을 설정합니다. 임계값은 0과 1 사이여야 합니다(기본값은 0.5).
+
+== pg_trgm 예시
+함수를 사용해 단어 사의의 유사성(거리)을 보여주기보다는 pg_trgm을 설치하고 like 검색 시 소요시간의 차이를 보여주는 예시입니다.
+
+랜덤 데이터를 가진 테이블 생성
+[source, sql]
+----
+create table test_trgm(col varchar(30);
+
+insert into test_trgm
+select substr('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', trunc(random() * 62)::integer + 1, trunc(random() * 10)::integer)
+FROM   generate_series(1, 100000) series;
+
+select * from test_trgm;
+    col    
+-----------
+ MNO
+ BCDEF
+ wxyzAB
+ 
+ QRSTUVW
+ PQRSTUVW
+ Q
+ wxyzABCDE
+ 
+ KLMNOP
+ VWXYZ
+ 
+ zABCD
+ BCDEFG
+ 
+ efghij
+ bcd
+ XYZ
+ jklmnop
+ W
+ jkl
+ 
+ TUVWX
+ hij
+ 
+ KLM
+ .
+ .
+ .
+ .
+ 10000만건 데이터 insert
+----
+
+임의의 3글자이상 문자를 like로 검색하는 것을 실행계획으로 확인합니다.
+[source, sql]
+----
+postgres=# explain analyze select * from test_trgm where col like '%abcd%';
+                                                QUERY PLAN                                                 
+-----------------------------------------------------------------------------------------------------------
+ Seq Scan on test_trgm  (cost=0.00..1706.00 rows=881 width=4) (actual time=0.031..38.355 rows=991 loops=1)
+   Filter: ((col)::text ~~ '%abcd%'::text)
+   Rows Removed by Filter: 99009
+ Planning Time: 0.110 ms
+ Execution Time: 38.542 ms
+(5 rows)
+--sequencial scan 및 실행시간확인
+----
+
+gin index 생성 후 똑같은 구문 실행계획 확인합니다.
+[source, sql]
+----
+postgres=# create index trgm_idx on test_trgm using gin(col gin_trgm_ops);
+CREATE INDEX
+postgres=# explain analyze select * from test_trgm where col like '%abcd%';
+                                                      QUERY PLAN                                                       
+-----------------------------------------------------------------------------------------------------------------------
+ Bitmap Heap Scan on test_trgm  (cost=26.83..497.22 rows=881 width=4) (actual time=1.115..4.054 rows=991 loops=1)
+   Recheck Cond: ((col)::text ~~ '%abcd%'::text)
+   Rows Removed by Index Recheck: 3348
+   Heap Blocks: exact=455
+   ->  Bitmap Index Scan on trgm_idx  (cost=0.00..26.61 rows=881 width=0) (actual time=1.012..1.013 rows=4339 loops=1)
+         Index Cond: ((col)::text ~~ '%abcd%'::text)
+ Planning Time: 0.238 ms
+ Execution Time: 4.251 ms
+(8 rows)
+--index scan 및 실행시간 확인
+----
+
+like 활용 구문에서 pg_trgm 사용 시 성능이 개선됨을 확인합니다.

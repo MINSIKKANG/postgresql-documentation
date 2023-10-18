@@ -1,0 +1,254 @@
+= postgis extention
+:toc:
+:toc-title:
+:table-caption!:
+:sectnums:
+
+Postgis 홈페이지 : https://postgis.net/docs/ +
+git 주소 : https://github.com/postgis/postgis +
+docker 버전 : https://github.com/postgis/docker-postgis
+
+== postgis 란?
+
+공간 데이터 처리를 지원하기 위해 사용하는 extension 이며, postgis 설치를 통해 공간 데이터를 처리하기 위한 데이터 타입을 지원할 수 있습니다. +
+license 는 GNU-GPL2 license를 사용합니다.
+
+. 다양한 vector 타입 지원 +
+- GeometryCollection +
+- MultiPolygon +
+- MultiLineString +
+- Polygon +
+- LineString +
+- Point +
+
+. raster 타입 지원 +
+- JPEG, TIFF, PNG 등의 디지털 평가 모델들 에서 가져온 데이터를 나타낼 때 사용하는 데이터 타입.
+
+. 공간 쿼리 기능 지원 + 
+- ST_Union +
+- ST_Intersects +
+- ST_DWitin +
+- ...등등
+
+. 공간 인덱스 지원 +
+- GeoServer +
+- QGIS +
+- uDig 
+- ...등등 오픈소스 소프트웨어와 연동 지원 
+
+== 설치 요구사항 
+PostGIS를 빌드하고 사용하기 위해서는 다음과 같은 요구사항들을 만족해야 합니다. +
+
+* 필수 사항 +
+postgreSQL 과 PostGIS 버전 호환성 및 패키지 정보 +
+  [ http://trac.osgeo.org/postgis/wiki/UsersWikiPostgreSQLPostGIS ]
+
+- postgreSQL : 9.3 이후 버전 권장 
+- GNC gcc 
+- make 
+- Proj4 : 4.6.0 이상 버전 권장
+- geos : 3.3 이상 버전 권장
+- LibXML2 : 2.5.x 이상 버전 권장
+- GDAL  : 1.8 이상 버전 권장 
+- perl 
+- CPAN 
+
+* 선택사항 +
+
+- shapefile 로더인 shp2pgsql-gui를 컴파일하기 위한 GTK ( 2.8+ 이상 권장 ) 
+- SFCGAL : 1.1 이상 버전 권장 +
+          PostGIS에 추가적인 2D, 3D 고급 분석 기능을 제공하는데 필요한 패키지 +
+          SFCGAL 설치하기 위해서는 CGAL, Boost 도 필요
+
+- 주소 표준화 도구 : 국가코드, 우편번호 등 주소 관련 데이터 타입 지원 +
+                    PCRE 라이브러리 필요 +
+                    PCRE 라이브러리는 최종 릴리스로 더 이상 배포 X +
+                    PCRE2 라이브러리 사용 권장 +
+
+== 설치 및 테스트
+
+설치를 누구나 할 수 있기 위해서 rpm 설치 권장
+
+* Source 설치 방법 +
+[ https://postgis.net/docs/manual-2.4/postgis-ko_KR.html#Address_Standardizer ]
+
+
+* rpm 설치 방법 +
+
+rpm 설치 +
+----
+rpm 주소 : https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm 
+           https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+
+# yum -y install https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
+# yum -y install https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+----
+
+postgis 패키지 확인 +
+----
+# yum list postgis32_14*
+
+[centos@server-3 ~]$ sudo yum list postgis32_14*
+Loaded plugins: fastestmirror
+Loading mirror speeds from cached hostfile
+ * base: mirror.kakao.com
+ * centos-sclo-rh: mirror.kakao.com
+ * centos-sclo-sclo: mirror.kakao.com
+ * epel: d2lzkl7pfhq30w.cloudfront.net
+ * extras: mirror.kakao.com
+ * updates: mirror.kakao.com
+Available Packages
+postgis32_14.x86_64                                          3.2.3-1.rhel7                                    pgdg14
+postgis32_14-client.x86_64                                   3.2.3-1.rhel7                                    pgdg14
+postgis32_14-devel.x86_64                                    3.2.3-1.rhel7                                    pgdg14
+postgis32_14-docs.x86_64                                     3.2.3-1.rhel7                                    pgdg14
+postgis32_14-gui.x86_64                                      3.2.3-1.rhel7                                    pgdg14
+postgis32_14-utils.x86_64                                    3.2.3-1.rhel7                                    pgdg14
+
+----
+
+postgis 설치 및 확인
+----
+# yum -y install postgis32_14*
+# rpm -qi postgis32_14 
+
+----
+
+hypersql user 접속
+----
+# su - hypersql
+$ psql -U postgres
+----
+
+CREATE EXTENSION
+----
+CREATE EXTENSION postgis; 
+CREATE EXTENSION postgis_raster;
+CREATE EXTENSION postgis_topology;
+CREATE EXTENSION postgis_sfcgal;
+CREATE EXTENSION fuzzystrmatch;
+CREATE EXTENSION address_standardizer;
+CREATE EXTENSION address_standardizer_data_us;
+CREATE EXTENSION postgis_tiger_geocoder;
+----
+
+PostGIS EXTENSION 확인
+----
+SELECT postgis_version();
+----
+
+PostGIS 실습 데이터 (DATA는 복사후 붙혀넣기)
+----
+$ psql -U postgres
+-- TABLE 
+CREATE TABLE cities_staging (
+gid serial,
+"scalerank" int2,
+"natscale" int2,
+"labelrank" int2,
+"featurecla" varchar(50),
+"name" varchar(100),
+"namepar" varchar(254),
+"namealt" varchar(254),
+"diffascii" int2,
+"nameascii" varchar(100),
+"adm0cap" numeric,
+"capalt" numeric,
+"capin" varchar(15),
+"worldcity" numeric,
+"megacity" int2,
+"sov0name" varchar(100),
+"sov_a3" varchar(3),
+"adm0name" varchar(50),
+"adm0_a3" varchar(3),
+"adm1name" varchar(50),
+"iso_a2" varchar(5),
+"note" varchar(254),
+"latitude" numeric,
+"longitude" numeric,
+"changed" numeric,
+"namediff" int2,
+"diffnote" varchar(254),
+"pop_max" int4,
+"pop_min" int4,
+"pop_other" int4,
+"rank_max" int4,
+"rank_min" int4,
+"geonameid" numeric,
+"meganame" varchar(50),
+"ls_name" varchar(41),
+"ls_match" int2,
+"checkme" int2,
+"max_pop10" numeric,
+"max_pop20" numeric,
+"max_pop50" numeric,
+"max_pop300" numeric,
+"max_pop310" numeric,
+"max_natsca" numeric,
+"min_areakm" numeric,
+"max_areakm" numeric,
+"min_areami" numeric,
+"max_areami" numeric,
+"min_perkm" numeric,
+"max_perkm" numeric,
+"min_permi" numeric,
+"max_permi" numeric,
+"min_bbxmin" numeric,
+"max_bbxmin" numeric,
+"min_bbxmax" numeric,
+"max_bbxmax" numeric,
+"min_bbymin" numeric,
+"max_bbymin" numeric,
+"min_bbymax" numeric,
+"max_bbymax" numeric,
+"mean_bbxc" numeric,
+"mean_bbyc" numeric,
+"compare" int2,
+"gn_ascii" varchar(254),
+"feature_cl" varchar(254),
+"feature_co" varchar(254),
+"admin1_cod" numeric,
+"gn_pop" numeric,
+"elevation" numeric,
+"gtopo30" numeric,
+"timezone" varchar(254),
+"geonamesno" varchar(100),
+"un_fid" int4,
+"un_adm0" varchar(254),
+"un_lat" numeric,
+"un_long" numeric,
+"pop1950" numeric,
+"pop1955" numeric,
+"pop1960" numeric,
+"pop1965" numeric,
+"pop1970" numeric,
+"pop1975" numeric,
+"pop1980" numeric,
+"pop1985" numeric,
+"pop1990" numeric,
+"pop1995" numeric,
+"pop2000" numeric,
+"pop2005" numeric,
+"pop2010" numeric,
+"pop2015" numeric,
+"pop2020" numeric,
+"pop2025" numeric,
+"pop2050" numeric,
+"cityalt" varchar(50),
+"geog" geometry(POINT,4326));
+ALTER TABLE cities_staging ADD PRIMARY KEY (gid);
+
+-- DATA
+INSERT INTO cities_staging ("scalerank","natscale","labelrank","featurecla","name","namepar","namealt","diffascii","nameascii","adm0cap","capalt","capin","worldcity","megacity","sov0name","sov_a3","adm0name","adm0_a3","adm1name","iso_a2","note","latitude","longitude","changed","namediff","diffnote","pop_max","pop_min","pop_other","rank_max","rank_min","geonameid","meganame","ls_name","ls_match","checkme","max_pop10","max_pop20","max_pop50","max_pop300","max_pop310","max_natsca","min_areakm","max_areakm","min_areami","max_areami","min_perkm","max_perkm","min_permi","max_permi","min_bbxmin","max_bbxmin","min_bbxmax","max_bbxmax","min_bbymin","max_bbymin","min_bbymax","max_bbymax","mean_bbxc","mean_bbyc","compare","gn_ascii","feature_cl","feature_co","admin1_cod","gn_pop","elevation","gtopo30","timezone","geonamesno","un_fid","un_adm0","un_lat","un_long","pop1950","pop1955","pop1960","pop1965","pop1970","pop1975","pop1980","pop1985","pop1990","pop1995","pop2000","pop2005","pop2010","pop2015","pop2020","pop2025","pop2050","cityalt",geog) VALUES ('10','1','5','Admin-1 region capital','Bombo',NULL,NULL,'0','Bombo','0.00000000000','0.00000000000',NULL,'0.00000000000','0','Uganda','UGA','Uganda','UGA','Bamunanika','UG',NULL,'0.58329910562','32.53329952490','4.00000000000','1','Added missing admin-1 capital. Changed feature to Admin-0 region capital.','75000','21000','0','8','7','-1.00000000000',NULL,NULL,'0','0','0','0','0','0','0','0','0','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0',NULL,NULL,NULL,'0.00000000000','0','0.00000000000','0.00000000000',NULL,'No GeoNames match due to small population, not in GeoNames, or poor NEV placement.','0',NULL,'0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000',NULL,'0101000020E61000002822A9284344404000D4CCE262AAE23F');
+INSERT INTO cities_staging ("scalerank","natscale","labelrank","featurecla","name","namepar","namealt","diffascii","nameascii","adm0cap","capalt","capin","worldcity","megacity","sov0name","sov_a3","adm0name","adm0_a3","adm1name","iso_a2","note","latitude","longitude","changed","namediff","diffnote","pop_max","pop_min","pop_other","rank_max","rank_min","geonameid","meganame","ls_name","ls_match","checkme","max_pop10","max_pop20","max_pop50","max_pop300","max_pop310","max_natsca","min_areakm","max_areakm","min_areami","max_areami","min_perkm","max_perkm","min_permi","max_permi","min_bbxmin","max_bbxmin","min_bbxmax","max_bbxmax","min_bbymin","max_bbymin","min_bbymax","max_bbymax","mean_bbxc","mean_bbyc","compare","gn_ascii","feature_cl","feature_co","admin1_cod","gn_pop","elevation","gtopo30","timezone","geonamesno","un_fid","un_adm0","un_lat","un_long","pop1950","pop1955","pop1960","pop1965","pop1970","pop1975","pop1980","pop1985","pop1990","pop1995","pop2000","pop2005","pop2010","pop2015","pop2020","pop2025","pop2050","cityalt",geog) VALUES ('10','1','5','Admin-1 region capital','Fort Portal',NULL,NULL,'0','Fort Portal','0.00000000000','0.00000000000',NULL,'0.00000000000','0','Uganda','UGA','Uganda','UGA','Kabarole','UG',NULL,'0.67100412113','30.27500161600','4.00000000000','1','Added missing admin-1 capital. Changed feature to Admin-0 region capital. Population from GeoNames.','42670','42670','0','7','7','233476.00000000000',NULL,NULL,'0','0','0','0','0','0','0','0','0','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0','Fort Portal','P','PPLA','79.00000000000','42670','0.00000000000','1535.00000000000','Africa/Kampala','Geonames ascii name + lat.d + long.d matching.','0',NULL,'0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000',NULL,'0101000020E610000090FA828166463E4000DA76A2DD78E53F');
+INSERT INTO cities_staging ("scalerank","natscale","labelrank","featurecla","name","namepar","namealt","diffascii","nameascii","adm0cap","capalt","capin","worldcity","megacity","sov0name","sov_a3","adm0name","adm0_a3","adm1name","iso_a2","note","latitude","longitude","changed","namediff","diffnote","pop_max","pop_min","pop_other","rank_max","rank_min","geonameid","meganame","ls_name","ls_match","checkme","max_pop10","max_pop20","max_pop50","max_pop300","max_pop310","max_natsca","min_areakm","max_areakm","min_areami","max_areami","min_perkm","max_perkm","min_permi","max_permi","min_bbxmin","max_bbxmin","min_bbxmax","max_bbxmax","min_bbymin","max_bbymin","min_bbymax","max_bbymax","mean_bbxc","mean_bbyc","compare","gn_ascii","feature_cl","feature_co","admin1_cod","gn_pop","elevation","gtopo30","timezone","geonamesno","un_fid","un_adm0","un_lat","un_long","pop1950","pop1955","pop1960","pop1965","pop1970","pop1975","pop1980","pop1985","pop1990","pop1995","pop2000","pop2005","pop2010","pop2015","pop2020","pop2025","pop2050","cityalt",geog) VALUES ('10','1','3','Admin-1 region capital','Potenza',NULL,NULL,'0','Potenza','0.00000000000','0.00000000000',NULL,'0.00000000000','0','Italy','ITA','Italy','ITA','Basilicata','IT',NULL,'40.64200213010','15.79899649560','4.00000000000','1','Added missing admin-1 capital. Population from GeoNames.','69060','69060','0','8','8','3170027.00000000000',NULL,NULL,'0','0','0','0','0','0','0','0','0','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0','Potenza','P','PPLA','2.00000000000','69060','0.00000000000','698.00000000000','Europe/Rome','Geonames ascii name + lat.d + long.d matching.','0',NULL,'0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000',NULL,'0101000020E610000080C9941116992F40F85D34202D524440');
+INSERT INTO cities_staging ("scalerank","natscale","labelrank","featurecla","name","namepar","namealt","diffascii","nameascii","adm0cap","capalt","capin","worldcity","megacity","sov0name","sov_a3","adm0name","adm0_a3","adm1name","iso_a2","note","latitude","longitude","changed","namediff","diffnote","pop_max","pop_min","pop_other","rank_max","rank_min","geonameid","meganame","ls_name","ls_match","checkme","max_pop10","max_pop20","max_pop50","max_pop300","max_pop310","max_natsca","min_areakm","max_areakm","min_areami","max_areami","min_perkm","max_perkm","min_permi","max_permi","min_bbxmin","max_bbxmin","min_bbxmax","max_bbxmax","min_bbymin","max_bbymin","min_bbymax","max_bbymax","mean_bbxc","mean_bbyc","compare","gn_ascii","feature_cl","feature_co","admin1_cod","gn_pop","elevation","gtopo30","timezone","geonamesno","un_fid","un_adm0","un_lat","un_long","pop1950","pop1955","pop1960","pop1965","pop1970","pop1975","pop1980","pop1985","pop1990","pop1995","pop2000","pop2005","pop2010","pop2015","pop2020","pop2025","pop2050","cityalt",geog) VALUES ('10','1','3','Admin-1 region capital','Campobasso',NULL,NULL,'0','Campobasso','0.00000000000','0.00000000000',NULL,'0.00000000000','0','Italy','ITA','Italy','ITA','Molise','IT',NULL,'41.56299911860','14.65599655890','4.00000000000','1','Added missing admin-1 capital. Population from GeoNames.','50762','50762','0','8','8','3180991.00000000000',NULL,NULL,'0','0','0','0','0','0','0','0','0','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0','Campobasso','P','PPLA','11.00000000000','50762','0.00000000000','630.00000000000','Europe/Rome','Geonames ascii name + lat.d + long.d matching.','0',NULL,'0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000',NULL,'0101000020E610000040B7EDC7DE4F2D405820E95A10C84440');
+INSERT INTO cities_staging ("scalerank","natscale","labelrank","featurecla","name","namepar","namealt","diffascii","nameascii","adm0cap","capalt","capin","worldcity","megacity","sov0name","sov_a3","adm0name","adm0_a3","adm1name","iso_a2","note","latitude","longitude","changed","namediff","diffnote","pop_max","pop_min","pop_other","rank_max","rank_min","geonameid","meganame","ls_name","ls_match","checkme","max_pop10","max_pop20","max_pop50","max_pop300","max_pop310","max_natsca","min_areakm","max_areakm","min_areami","max_areami","min_perkm","max_perkm","min_permi","max_permi","min_bbxmin","max_bbxmin","min_bbxmax","max_bbxmax","min_bbymin","max_bbymin","min_bbymax","max_bbymax","mean_bbxc","mean_bbyc","compare","gn_ascii","feature_cl","feature_co","admin1_cod","gn_pop","elevation","gtopo30","timezone","geonamesno","un_fid","un_adm0","un_lat","un_long","pop1950","pop1955","pop1960","pop1965","pop1970","pop1975","pop1980","pop1985","pop1990","pop1995","pop2000","pop2005","pop2010","pop2015","pop2020","pop2025","pop2050","cityalt",geog) VALUES ('10','1','3','Admin-1 region capital','Aosta',NULL,NULL,'0','Aosta','0.00000000000','0.00000000000',NULL,'0.00000000000','0','Italy','ITA','Italy','ITA','Valle d''Aosta','IT',NULL,'45.73700106710','7.31500259571','4.00000000000','1','Added missing admin-1 capital. Population from GeoNames. Changed feature class.','34062','34062','0','7','7','3182997.00000000000',NULL,NULL,'0','0','0','0','0','0','0','0','0','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0','Aosta','P','PPLA','19.00000000000','34062','0.00000000000','585.00000000000','Europe/Rome','Geonames ascii name + lat.d + long.d matching.','0',NULL,'0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000','0.00000000000',NULL,'0101000020E610000040DA5A0A90421D40A8180C0D56DE4640');
+
+----
+
+pgAdmin 접속 
+----
+SELECT * FROM cities_staging; 
+-- 조회된 데이터에서 geog 컬럼 항목 찾은 후 체크박스 클릭
+----

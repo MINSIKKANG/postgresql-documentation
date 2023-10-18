@@ -1,0 +1,40 @@
+= old_snapshot
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== old_snapshot 설명
+old_snapshot은 old_snapshot_threshold를 구현하는데 사용되는 서버 상태를 검사할 수 있습니다.
+
+* old_snapshot_threshold
+비동기 동작중 하나로, 스냅샷을 사용할 때 "snapshot too old" 오류가 발생 하지 않고 쿼리 스냅샷을 사용할 수 있는 최소 시간을 설정합니다. 이 임계값보다 오래된 죽은 데이터는 vacuum처리 될 수 있습니다. 이렇게 하면 오랫동안 사용된 스냅샷의 부풀림을 방지할 수 있습니다. 이 단위의 default 단위는 "분" 단위이며, -1이 기본값으로, 기능을 비활성화하여 스냅샷 수명 제한을 무한대로 효과적으로 설정합니다. 이 매개변수는 서버 시작 시에만 설정할 수 있습니다.
+
+이 기능이 활성화되면 relation 종료 시 사용 가능한 공간을 운영 체제에 해제할 수 없습니다. 이렇게 하면 "snapshot too old" 상태를 감지하는데 필요한 정보가 제거될 수 있기 때문입니다. relation에 할당된 모든 공간은 명시적으로 해제되지 않는 한(예-VACUUM FULL 명령) 해당 relation 내에서만 재사용을 위해 해당 relation과 연결된 상태로 유지됩니다.
+
+*제공되는 함수*
+
+pg_old_snapshot_time_mapping(array_offset OUT int4, end_timestamp OUT timestamptz, newest_xmin OUT xid) returns setof record
+
+XID 매핑에 대한 서버 timestamp의 모든 항목을 반환합니다. 각 항목은 해당 분에 찍은 모든 스냅샷의 최신 xmin을 나타냅니다.
+
+== old_snapshot 예시
+postgresql.conf 의 old_snpashot_threshold를 30분으로 주고, pg_old_snapshot_time_mapping 함수를 사용했을 때의 결과 예시입니다.
+[source,sql]
+----
+show old_snapshot_threshold;
+
+ old_snapshot_threshold 
+------------------------
+ 30min
+(1 row)
+
+SELECT * FROM pg_old_snapshot_time_mapping() ;
+ array_offset |     end_timestamp      | newest_xmin 
+--------------+------------------------+-------------
+            0 | 2022-09-29 01:44:00-04 |        1354
+            1 | 2022-09-29 01:45:00-04 |        1354
+            2 | 2022-09-29 01:46:00-04 |        1354
+            3 | 2022-09-29 01:47:00-04 |        1354
+(4 rows)
+----

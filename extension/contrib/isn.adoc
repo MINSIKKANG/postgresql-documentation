@@ -1,0 +1,93 @@
+= isn
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== isn 설명
+isn 모듈은 EAN13, UPC, ISBN(도서), ISMN(음악) 및 ISSN(연재물) 과 같은 국제 제품 번호 지정 표준에 대한 데이터 유형을 제공합니다. 숫자는 하드 코딩된 접두사 목록에 따라 입력시 valid check가 진행됩니다. 접두사 목록이 변경되면 다시 컴파일해야하기 때문에 추후 이 모듈의 접두사 valid check 지원이 중단 될 수 있습니다.
+
+isn 데이터 유형
+
+EAN13 :	유럽 ​​품목 번호, 항상 EAN13 표시 형식으로 표시됨 +
+ISBN13 :	새로운 EAN13 표시 형식으로 표시될 국제 표준 도서 번호 +
+ISMN13 :	새로운 EAN13 표시 형식으로 표시되는 국제 표준 음악 번호 +
+ISSN13 :	새로운 EAN13 표시 형식으로 표시될 국제 표준 일련 번호 +
+ISBN :	기존의 짧은 표시 형식으로 표시되는 국제 표준 도서 번호 +
+ISMN :	기존의 짧은 표시 형식으로 표시되는 국제 표준 음악 번호 +
+ISSN :	기존의 짧은 표시 형식으로 표시되는 국제 표준 일련 번호 +
+UPC :	범용 제품 코드
+
+isn 지원 function
+
+isn_weak ( boolean ) → boolean +
+weak input mode 세팅 및 신규 세팅을 return 합니다.
+
+isn_weak () → boolean +
+현재 weak mode를 return 합니다.
+
+make_valid ( isn ) → isn +
+잘못된 번호를 확인합니다(invalid flag를 클리어).
+
+is_valid ( isn ) → boolean +
+invalid 플래그가 있는지 확인합니다.
+
+weak mode라는 것은 유효하지 않은 데이터를 테이블에 삽입하는데 사용됩니다. invalid는 누락이아니라 check가 잘못되었음을 의미합니다. weak mode를 사용해 테이블에 유효하지 않은 숫자를 insert하면, 숫자가 수정되어 insert 되지만 끝에 느낌표와 함께 표시됩니다. 이는 is valid 함수로 확인하고, make_valid함수로 지울 수 있습니다.
+
+
+== isn 예시
+다음은 isn 데이터 유형 및 함수를 테스트하는 예시입니다.
+
+[source,sql]
+----
+CREATE TABLE test_isn (id isbn);
+INSERT INTO test_isn VALUES('9780393040029');
+INSERT INTO test_isn VALUES('220500896?');
+INSERT INTO test_isn VALUES('978055215372?');
+
+postgres=# select * from test_isn;
+      id       
+---------------
+ 0-393-04002-X
+ 2-205-00896-X
+ 0-552-15372-9
+(3 rows)
+
+SELECT isn_weak(true);
+INSERT INTO test_isn VALUES('978-0-11-000533-4');
+INSERT INTO test_isn VALUES('9780141219307');
+INSERT INTO test_isn VALUES('2-205-00876-X');
+SELECT isn_weak(false);
+
+SELECT id FROM test_isn WHERE NOT is_valid(id); -- 끝에 !로 유효하지 않은 숫자 확인
+       id       
+----------------
+ 0-11-000533-3!
+ 0-14-121930-0!
+ 2-205-00876-5!
+(3 rows)
+
+UPDATE test_isn SET id = make_valid(id) WHERE id = '2-205-00876-X!';
+
+SELECT * FROM test_isn;
+       id       
+----------------
+ 0-393-04002-X
+ 2-205-00896-X
+ 0-552-15372-9
+ 0-11-000533-3!
+ 0-14-121930-0!
+ 2-205-00876-5 -- < make_valid로 유효하지 않은 2-205-00876-X! 데이터의 flag(!) 클리어
+(6 rows)
+
+SELECT isbn13(id) FROM test_isn;
+       isbn13       
+--------------------
+ 978-0-393-04002-9
+ 978-2-205-00896-8
+ 978-0-552-15372-0
+ 978-0-11-000533-1!
+ 978-0-14-121930-1!
+ 978-2-205-00876-0 -- < isbn13으로 유효한 값 변환 확인
+(6 rows)
+----
