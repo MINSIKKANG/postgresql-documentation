@@ -1,0 +1,319 @@
+= Ora2pg Migration Tool
+:toc:
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== Ora2pg 개요
+
+Ora2pg는 Oracle Database 를 PostgreSQL Database 로 Migration 하는데 사용되는 무료 도구입니다.
+
+Oracle Database 를 연결하고 자동으로 스캔하여 오브젝트와 데이터를 Export 하고 PostgreSQL에 Import 할 수 있는 SQL Scripts를 생성할 수 있습니다.
+
+데이터 같은 경우 SQL Scripts로 Export 할 수도 있고, Oracle과 다이렉트 연결 하여 직접 데이터 Migration 을 할 수도 있습니다.
+
+Oracle  함수, 프로시저, 패키지 및 트리거 등 Export 시 Oracle 의 특정 PL/SQL 코드는 PostgreSQL 의 PL/pgSQL 구문과 일치하는지 검토 해야합니다.
+
+== Ora2pg 설치
+
+* HyperSQL for PostgreSQL 표준 설치를 기준으로 가이드를 작성하였음.* + 
+
+*1. Postgresql Client 설치 또는 PostgreSQL Server 가 설치되어 있어야함* + 
+xref:../docs/install/README.adoc[PostgreSQL 설치 방법]
+
+*2. Oracle Instant Client 설치 또는 Oracle Server 가 설치되어 있어야함* +
+* Oracle 다운로드 센터에서 다운로드 및 설치 ( Oracle Server 와 동일 버전으로 설치할 것 )
+
+( https://www.oracle.com/database/technologies/instant-client/linux-x86-64-downloads.html )
+----
+# rpm -ivh oracle-instantclient12.2-basic-12.2.0.1.0-1.x86_64.rpm
+
+# rpm -ivh oracle-instantclient12.2-devel-12.2.0.1.0-1.x86_64.rpm
+
+# rpm -ivh oracle-instantclient12.2-jdbc-12.2.0.1.0-1.x86_64.rpm
+
+# rpm -ivh oracle-instantclient12.2-sqlplus-12.2.0.1.0-1.x86_64.rpm
+----
+
+*3. perl 모듈 설치* 
+----
+yum install -y perl-DBD-Pg perl perl-DBI  perl-CPAN git
+----
+
+*4. 환경 변수 설정*
+
+4-1. hypersql 유저에게 sudo 권한 부여
+----
+# echo "hypersql  ALL=(ALL)  NOPASSWD: ALL" >> /etc/sudoers
+----
+
+4-2. hypersql 유저로 접속
+----
+#  su - hypersql
+----
+
+4-3. Oracle 환경 변수 설정
+----
+$ vi .bash_profile
+
+export ORACLE_HOME=/usr/lib/oracle/12.2/client64
+export LD_LIBRARY_PATH=$ORACLE_HOME/lib:$LD_LIBRARY_PATH
+export PATH=$ORACLE_HOME/bin:$PATH 
+
+$ . .bash_profile
+----
+
+*5. DBD::Oracle 설치* 
+
+5-1. hypersql User 에서 실행 Enter 3번
+----
+$ sudo cpan -f -i DBD:Oracle
+----
+
+*6. ora2pg Github 다운로드 및 설치*
+----
+$ git clone https://github.com/darold/ora2pg.git
+$ cd ora2pg/
+$ perl Makefile.PL
+$ make 
+$ sudo make install
+----
+
+== Ora2pg 설정 및 사용
+
+*1. Project 생성*
+----
+$ ora2pg --project_base $Project_PATH --init_project $Project_NAME
+----
+
+*2. Project 설정*
+
+* xref:./ora2pg.conf/README.adoc[ora2pg.conf Parameter]
+
+Oracle Database Migration 전체 프로세스는 ora2pg.conf 파일 구성을 통해 이루어집니다.
+
+해당 파일 형식은 대문자 지시어와 지시어 뒤 탭 문자와 값으로 구성됩니다.
+
+지시어 같은 경우 ora2pg 바이너리 실행 시 옵션을 주면 config 에 지시어 값을 덮어 쓸 수 있습니다.
+
+아래와 같은 형식으로 Oracle DSN 지시어 및 스키마 정보 등을 작성합니다.
+
+----
+# 기본 동작을 확인하기 위한 주요 파라미터 설정
+$ vi ora2pg.conf 
+
+ORACLE_HOME $ORACLE_HOME
+ORACLE_DSN  dbi:ORACLE:host=192.168.123.123;sid=DB_SID;port=1521
+ORACLE_USER system
+ORACLE_PWD  1234
+
+SCHEMA TEST_SCHEMA
+----
+
+*3. Oracle DSN 연결 확인*
+----
+$ ora2pg -t SHOW_VERSION -c ora2pg.conf
+
+[2022-08-11 11:27:47] Ora2Pg version: 23.1
+[2022-08-11 11:27:47] Export type: SHOW_VERSION
+[2022-08-11 11:27:47] Geometry export type: INTERNAL
+[2022-08-11 11:27:47] ORACLE_HOME = /usr/lib/oracle/12.2/client64
+[2022-08-11 11:27:47] NLS_LANG = AMERICAN_AMERICA.AL32UTF8
+[2022-08-11 11:27:47] NLS_NCHAR = AL32UTF8
+[2022-08-11 11:27:47] Trying to connect to database: dbi:Oracle:host=172.27.0.220;sid=hypersql;port=1521
+[2022-08-11 11:27:47] Isolation level: SET TRANSACTION ISOLATION LEVEL SERIALIZABLE
+[2022-08-11 11:27:47] Showing Database Version...
+[2022-08-11 11:27:47] Oracle Database 12c Enterprise Edition Release 12.2.0.1.0
+----
+
+== Ora2pg Assessment
+----
+ora2pg 는 모든 데이터베이스 object, 모든 function 및 procedure 를 검사하여 ora2pg 에서 자동으로 변환할 수 없는 일부 object 및 PL/SQL 코드가 있는지 검사합니다.
+
+오브젝트 유형에 따른 비용을 할당 하고, 오브젝트의 총 수, 추가 설명 등 기타 세부 정보도 Ora2pg Migration Report 를 제공합니다.
+
+Report 를 제공 받기 위해 수행 방법을 ora2pg.conf 파일에서 직접 설정할 수도 있고 ora2pg 바이너리 수행 시 옵션으로 설정할 수도 있습니다.
+
+아래는 ora2pg 바이너리 수행 시 옵션에 대한 내용입니다. ora2pg.conf 파일에서 더 자세히 설정하고 싶다면 ASSESSMENT SECTION 을 참고하세요.
+----
+
+=== Ora2pg Assessment Execute & Option
+
+* 수행 예시
+
+*ora2pg -c ora2pg.conf -t SHOW_REPORT --estimate_cost --dump_as_html --cost_unit_value 5 > report.html*
+
+*ora2pg -c ora2pg.conf -t SHOW_TABLE > table.txt*
+
+*ora2pg -c ora2pg.conf -t SHOW_COLUMN > columns.txt*
+
+----
+--estimate_cost : 
+
+마이그레이션 비용 평가를 활성화합니다. 
+SHOW_REPORT TYPE 과 함께 사용해야 합니다.
+FUNCTION, PROCEDURE, PACKAGE 및 QUERY Export TYPE 에만 설정할 수 있습니다.
+기본값은 비활성화되어 있습니다.
+이 지시문을 활성화하면 PLSQL_PGSQL이 강제로 활성화됩니다.
+
+--dump_as_html :
+
+마이그레이션 비용 평가가 활성화 되면 리포트가 단순한 텍스트로 남지만, 해당 옵션을 적용하면 HTML 형식으로 리포트를 저장할 수 있습니다.
+
+--dump_as_csv      : 
+
+위와 같지만 CSV 형식으로 Report 를 덤프하도록 ora2pg를 실행합니다.
+
+--dump_as_sheet    :
+
+데이터베이스당 하나의 CSV 행으로 마이그레이션 평가를 보고합니다.
+
+--cost_unit_value :
+
+마이그레이션 비용 평가 단위의 값을 분 단위로 설정합니다.
+기본값은 Unit 당 5분입니다.
+----
+
+== Ora2pg Export Type
+
+Export 작업은 단일 구성 지시어 'TYPE'에 따라 수행됩니다.
+
+[width="50%", options="header"]
+|====================
+|TYPE |Describtion
+|TABLE      |  indexes, primary keys, unique keys, foreign keys and check constraints 를 포함한 모든 table 을 추출합니다.
+|VIEW       |  views 만 추출합니다.
+|GRANT      |  Pg 그룹, 사용자 및 모든 개체에 대한 권한 부여로 변환된 역할을 추출합니다.
+|SEQUENCE   |  모든 sequence 와 마지막 위치를 추출합니다.
+|TABLESPACE |  table 및 index에 대한 storage space 를 추출합니다(Pg >= v8).
+|TRIGGER    |  trigger 를 추출합니다.
+|FUNCTION   |  function 를 추출합니다.
+|PROCEDURE  |  procedure 를 추출합니다.
+|PACKAGE    |  packages / package bodies 를 추출합니다.
+|INSERT     |  INSERT 구문으로 data 를 추출합니다.
+|COPY       |  COPY 구문으로 data 를 추출합니다.
+|PARTITION  |  range / list Oracle partitions 을 subpartitions 과 함께 추출합니다.
+|TYPE       |  user defined Oracle type 을 추출합니다.
+|FDW        |  Export Oracle tables as foreign table for oracle_fdw.
+|MVIEW      |  Export materialized view.
+|QUERY      |  Try to automatically convert Oracle SQL queries.
+|KETTLE     |  Generate XML ktr template files to be used by Kettle.
+|DBLINK     |  Generate oracle foreign data wrapper server to use as dblink.
+|SYNONYM    |  Export Oracle's synonyms as views on other schema's objects.
+|DIRECTORY  |  Export Oracle's directories as external_file extension objects.
+|LOAD       |  Dispatch a list of queries over multiple PostgreSQl connections.
+|TEST       |  perform a diff between Oracle and PostgreSQL database.
+|TEST_COUNT |  perform a row count diff between Oracle and PostgreSQL table.
+|TEST_VIEW  |  perform a count on both side of number of rows returned by views.
+|TEST_DATA  |  perform data validation check on rows at both sides.
+|====================
+
+=== Ora2pg Usage
+
+Usage: ora2pg [-dhpqv --estimate_cost --dump_as_html] [--option value]
+----
+아래 자료의 Ora2Pg usage 참고
+
+https://ora2pg.darold.net/documentation.html#Optional
+----
+
+* 수행 예시
+----
+ora2pg -p -t FUNCTION -o functions2.sql -b %namespace%/schema/functions -c %namespace%/config/ora2pg.conf 
+ora2pg -p -t PACKAGE -o packages.sql -b %namespace%/schema/packages -c %namespace%/config/ora2pg.conf
+ora2pg -p -t PARTITION -o partitions.sql -b %namespace%/schema/partitions -c %namespace%/config/ora2pg.conf
+ora2pg -p -t PROCEDURE -o procs.sql -b %namespace%/schema/procedures -c %namespace%/config/ora2pg.conf
+ora2pg -p -t SEQUENCE -o sequences.sql -b %namespace%/schema/sequences -c %namespace%/config/ora2pg.conf
+ora2pg -p -t SYNONYM -o synonym.sql -b %namespace%/schema/synonyms -c %namespace%/config/ora2pg.conf
+ora2pg -p -t TABLE -o table.sql -b %namespace%/schema/tables -c %namespace%/config/ora2pg.conf 
+ora2pg -p -t TABLESPACE -o tablespaces.sql -b %namespace%/schema/tablespaces -c %namespace%/config/ora2pg.conf
+ora2pg -p -t TRIGGER -o triggers.sql -b %namespace%/schema/triggers -c %namespace%/config/ora2pg.conf 
+ora2pg -p -t TYPE -o types.sql -b %namespace%/schema/types -c %namespace%/config/ora2pg.conf 
+ora2pg -p -t VIEW -o views.sql -b %namespace%/schema/views -c %namespace%/config/ora2pg.conf
+----
+
+*4. ora2pg Project 내부 자동화 쉘 사용*
+
+* Oracle 스키마 Export
+----
+자세한 내용은 쉘 스크립트 확인
+./export_schema.sh
+----
+
+* Export 후 스키마 전체 Import
+----
+자세한 내용은 쉘 스크립트 확인
+./import_all.sh
+----
+
+== 특이사항
+
+*DDL*
+|===
+|Type|호환성|비고
+|GLOBAL TEMPORARY TABLE|X|
+|INDEX|O|
+|INDEX PARTITION|O|
+|INDEX SUBPARTITION|O|
+|TABLE|O|set default_tablespace 구문 추가 필요
+|TABLE PARTITION|O|
+|TABLE SUBPARTITION|O|
+|SEQUENCE|O|
+|TRIGGER|X|
+|FUNCTION|X|
+|PROCEDURE|X|
+|PACKAGE|X|
+|===
+
+
+*데이터 이관시 주의 사항*
+
+*TABLE SUBPARTITION HASH* 은 PARTITION 마다 SUBPARTITION이 지정되어 있지 않다면, PARTITION에 해당되는 dummy_SUBPARTITION 을 생성 
+
+※ RANGE, LIST 무관 합니다.  
+
+[source, sql]
+----
+## Range - HASH Partition table 
+CREATE TABLE SUB_PART
+(
+	COLUMN_1 NUMBER		NOT NULL,
+	COLUMN_2 VARCHAR2(4),
+	COLUMN_3 VARCHAR2(4),
+	COLUMN_4 VARCHAR2(2),
+	COLUMN_5 VARCHAR2(2),
+	COLUMN_6 NUMBER
+)
+TABLESPACE TBS_hans
+PARTITION BY RANGE ( COLUMN_3)
+SUBPARTITION BY HASH ( COLUMN_5 )
+(
+	PARTITION P_200801 VALUES LESS THAN ('2007'),
+	PARTITION P_200802 VALUES LESS THAN ('2008'),
+	PARTITION P_200803 VALUES LESS THAN ('2009')
+		(
+		SUBPARTITION  P_200803_S1  ,
+		 SUBPARTITION  P_200803_S2 ,
+		 SUBPARTITION  P_200803_S3 ,
+		 SUBPARTITION  P_200803_S4 ,
+		 SUBPARTITION  P_200803_S5 ,
+		 SUBPARTITION  P_200803_S6 ,
+		 SUBPARTITION  P_200803_S7 ,
+		 SUBPARTITION  P_200803_S8 
+		),
+	PARTITION P_200804 VALUES LESS THAN ('2010')
+);
+----
+
+위에 SQL문을 보셨을때 RANGE PARTITION 지정한 후 P_200803에 파티션에 대해서만 SUBPARTITION 을 지정을 했지만 해당 테이블 DDL을 export 하게 된다면 각각의 RANGE PARTITION에 대해 sub_part_p_200801_sys_subp633 등의 dummy_subpartition이 생성이 됩니다. 
+
+
+
+
+*Invalid Objects*::
+AS-IS ( Oracele ) 에서의 Invalid Object 들은 export 대상이 아닙니다.
+
+
+
+
+

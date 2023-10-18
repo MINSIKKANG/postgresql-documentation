@@ -1,0 +1,366 @@
+= pg_profile
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+
+== pg_profile 개요
+
+- github 사이트 - https://github.com/zubkov-andrei/pg_profile
+- 설치 및 구성 참고 사이트 - https://dbsguru.com/configure-and-monitor-using-pg_profile-in-postgresql/
+
+pg_profile은 postgresql 데이터베이스에서 리소스를 가장 많이 사용하는 활동을 찾는데 도움이됩니다. 
+
+extension 형태로 설치가 되며, pg_stat_statements의 통계 보기를 기반으로 합니다. pg_profile은 pl/pgsql로 작성되었으며, 외부라이브러리나 소프트웨어가 필요하지 않지만 스케줄링 작업을 수행하는 cron과 유사한 툴이 필요합니다. 
+또한 필수요소는 아니지만, pg_stat_kcache라는 extension이 설치되어있다면, SQL의 CPU 사용량 및 파일 시스템 로드에 대한 정보도 제공 가능합니다.
+
+pg_profile은 데이터베이스 내 테이블을 repository로 가지고 있으며 이 repository는 postgresql 클러스터에 대한 스냅샷 개념의 "sample"을 보유하게됩니다. sample은 함수를 사용해 호출됩니다.
+
+sample을 채취할 때마다 pg_stat_statements_reset()*이 호출되어, pg_stat_statements.max*에 도달할때까지 명령문이 느슨해지지 않도록 잡아줍니다. 또한 report에는 sample에서 캡처된 명령문이 pg_stat_statements.max의 90%에 도달하면 알려주는 section이 포함됩니다.
+
+한 클러스터에 설치된 pg_profile은 별도의 명칭을 지정할 수 있는 "server"를 통해 다른 클러스터에서 통계를 수집할 수 있습니다. (대상서버 외 pg_profile용도의 repository서버 구성 가능)
+
+*pg_stat_statements_reset() : 지금까지 수집된 통계를 버리는 함수
+*pg_stat_statements.max : postgresql.conf에 설정하는 매개변수로, pg_stat_statments 모듈이 추적하는 명령문의 최대 수. max값을 넘어서는 명령문이 관찰되면 가장 적게 실행된 명령문에 대한 정보가 삭제됨
+
+== pg_profile 특징
+- 별도 외부 라이브러리, 프로그램 없이 extension형태로 설치 됩니다.
+(선행 extension이 필요하며 필수 - dblink, pg_stat_statement, 선택 - pg_stat_kcache)
+
+- 모두 pg_profile이 설치되어 있다는 가정 하에 다른 클러스터의 통계도 수집할 수 있습니다.(대상 서버의 부하를 고려해 pg_profile repository 전용 서버 구성도 가능)
+
+- 스냅샷 형태의 "sample"은 pg_profile의 repository에 sample*테이블들, 그리고 servers 테이블에 순번이 부여되어 저장 됩니다.
+
+- report는 html 형태로 파일 저장 가능하며, 형태는 오라클의 AWR과 유사하게 출력됩니다. pg_profile의 고유 기능으로, sample을 두 구간으로 지정해 비교 가능합니다.
+
+* 예시 - 순번 10~15번 sample을 1번 구간, 순번 16~20번 sample을 2번 구간으로 지정하여 1번 - 2번 구간 성능 비교 가능
+
+- report를 sample의 순번이아닌 시간으로 검색이 가능하나, 스냅샷에 저장되어있는 시간 외에 본인이 원하는 구간으로는 검색이 불가능합니다.
+
+* 예시 - 스냅샷을 cron으로 10시 정시에 시작해서 10분 단위로 걸었으나, DB의 이슈가 발생해 10시 8분 ~ 15분 사이의 성능을 보고싶다고 가정. 8분과 15분으로 오류없이 report 추출은 되나 추출된 결과는 10:00 ~ 10:20분까지의 내용으로 나오게 됨.
+
+
+== pg_profile 설치
+
+*설치방법*
+
+- 전제조건
+
+* postgresql.conf 매개변수 설정
+
+track_activities = on +
+설명 : 각 세션에서 현재 실행 중인 명령의 실행이 시작될 때 해당 명령에 대한 정보 수집을 활성화 합니다. default 값은 on 입니다.
+
+track_counts = on +
+설명 : 데이터베이스 작업에 대한 통계 수집을 활성화 합니다. autovacuum은 수집된 정보를 필요로 하므로 이 매개변수의 default 값은 on 입니다. 
+    
+track_io_timing = on +
+데이터베이스 I/O 호출의 타이밍을 활성화 합니다. 운영 체제에 현재 시간을 반복해서 쿼리함으로써 일부 플랫폼에서는 상당한 오버헤드가 발생되므로 이 매개변수의 default 값은 off 입니다.
+
+track_wal_io_timing = on      # Since Postgres 14 +
+WAL I/O 호출 타이밍을 활성화 합니다. 이 매개변수의 default 값은 off 입니다. 현재 시간에 대해 운영 체제를 반복적으로 쿼리하므로 일부 플랫폼에서 상당한 오버헤드가 발생할 수 있습니다. 
+
+track_functions = all/pl 
+함수 호출 횟수 및 사용된 시간의 추적할 수 있습니다. pl 값이면 프로시저, 함수만 추적하고 all값이면 SQL 및 C 언어도 추적합니다. default 값은 함수 통계 추적을 비활성화하는 none입니다. 
+
+- 1단계 extension 파일 설치
+
+1. extension 압축파일(tar.gz)을 git에서 최신 release 버전 다운받습니다.
+https://github.com/zubkov-andrei/pg_profile/releases
+
+2. /usr/pgsql-버전명/share/extension 경로에 tar.gz파일 압축을 풉니다.
+[source,Bash]
+----
+        # tar xzf pg_profile-<version>.tar.gz --directory $(pg_config --sharedir)/extension
+
+        ** $(pg_config --sharedir)/extension은 /usr/pgsql-버전명/share/extension 경로를 의미합니다.
+----
+
+- 2단계 create extension
+1. pg_profile extension을 설치할 데이터베이스에 접속합니다.
+
+
+2. dblink, pg_stat_statement extension 설치 후 pg_profile extension을 설치합니다.
+[source,sql]
+----
+        postgres=# CREATE EXTENSION dblink;
+        postgres=# CREATE EXTENSION pg_stat_statements;
+        postgres=# CREATE EXTENSION pg_profile;
+----
+ 
+공식문서에서는 pg_profile 설치할 전용 스키마 생성을 권장합니다.
+
+[source,sql]
+----
+        postgres=# CREATE EXTENSION dblink;
+        postgres=# CREATE EXTENSION pg_stat_statements;
+        postgres=# CREATE SCHEMA profile;
+        postgres=# CREATE EXTENSION pg_profile SCHEMA profile;
+----
+- 3단계 exention new version update
+1. 기존에 pg_profile을 쓰다가 신규 버전이 나와 업데이트할 경우, 우선 1단계 과정 수행합니다.
+
+2. 업데이트 명령어를 수행하면 포함된 마이그레이션 스크립트가 수행되어 extension 재설치 필요없이 신규버전으로 세팅됩니다.
+[source,sql]
+----
+        postgres=# ALTER EXTENSION pg_profile UPDATE;
+----
+
+
+== pg_profile 사용
+
+=== 매개변수 설정
+postgresql.conf에서 아래 매개변수를 정의할 수 있습니다.
+
+- pg_profile.topn = 20 - report section의 최상위 개체를 지정하는  변수 입니다(top query 갯수등). 또한 이 매개변수는 sample의 크기에 영향을 미칩니다. report에 더 많은 개체를 표시할 수록 sample에 더 많은 개체를 보관해야 합니다. default 값은 20입니다.
+- pg_profile.max_sample_age = 7 - sample의 보유 시간(일 단위) 입니다. 지정된 일을 넘어간 오래된 sample들은 다음 take_sample() 호출에서 자동으로 삭제됩니다.
+- pg_profile.track_sample_timings = off - 이 매개변수가 켜져 있을 때 pg_profile 은 자세한 sample 채취 타이밍을 추적합니다.
+- pg_profile.max_query_length = 20000 - report에 대한 쿼리 길이 제한 입니다. report의 모든 쿼리는 이 길이로 잘립니다. 이 설정은 쿼리 텍스트 수집에 영향을 주지 않습니다.
+
+=== 서버 관리
+pg_profile이 설치될 때 기본적으로 'local'이라는 서버명을 생성합니다. 아래 함수들로 서버를 설정하고 삭제하는등 컨트롤이 가능합니다.
+
+- create_server(server name, server_connstr text, server_enabled boolean = TRUE, max_sample_age integer = NULL, description text = NULL) +
+서버를 새로 등록하는데 사용되는 함수이며 인자값은 아래와 같습니다.
+
+** server - 등록할 서버명 (고유해야 함)
+** server_connstr - 서버 연결 문자열
+** server_enabled - 서버 활성화 플래그입니다. 설정되면 서버가 인자값 없는 take_sample() 호출 에 포함됩니다.
+** max_sample_age - 서버 sample 보존 일수입니다. 매개변수가 이 서버에 대한 전역 pg_profile.max_sample_age 설정을 재정의합니다.
+** description - 서버 설명입니다. report에 포함됩니다.
+
+- drop_server(server name) + 
+서버와 모든 sample을 삭제합니다.
+
+- enable_server(server name) + 
+인자값 없는 take_sample() 호출에 서버를 포함합니다.
+
+- disable_server(server name) + 
+인자값 없는 take_sample() 호출에서 서버를 제외합니다.
+
+- rename_server(server name, new_name name) +
+서버 이름을 바꿉니다.
+
+- set_server_max_sample_age(server name, max_sample_age integer) +
+서버에 대한 새 보존 기간(일)을 설정합니다. max_sample_age 는 정수 값입니다. 서버 max_sample_age 설정을 재설정하려면 NULL로 설정해야 합니다.
+
+- set_server_db_exclude(server name, exclude_db name[]) +
+서버에 대한 제외 데이터베이스 목록을 설정합니다. 클러스터의 일부 데이터베이스(예: Amazon RDS 인스턴스)에 연결할 수 없는 경우에 사용됩니다.
+
+- set_server_connstr(server name, new_connstr text) +
+ 서버에 대한 새 연결 문자열을 설정합니다.
+
+- set_server_description(server name, description text) +
+ 새 서버 설명을 설정합니다.
+
+- show_servers() +
+ 등록되어있는 서버를 표시합니다.
+
+- 서버 생성 예 +
+[source,sql]
+----
+SELECT profile.create_server('omega','host=name_or_ip dbname=postgres port=5432');
+----
+
+=== Rare relation sizes collection
+postgresql의 relation size 함수는 데이터베이스의 모든 relation size를 수집하는데 상당한 시간이 걸릴 수 있습니다. pg_profile은 정책에 따라 relation size 수집을 건너 뛸 수 있습니다. 정책은 relation size 수집이 허용되는 daily window로 정의되며, relation size가 수집된 두 sample 사이의 최소 간격입니다. 따라서 정책이 정의되면 sample 채취 기능은 sample을 window에서 가져오고, 이전 sample이 gap 보다 오래된 경우에만 relation size를 수집하게 됩니다. set_server_size_sampling 함수로 relation size 정책을 정의합니다.
+
+* set_server_size_sampling(server name, window_start time with time zone = NULL, window_duration interval hour to second = NULL, sample_interval interval day to minute = NULL)
+
+** server - 서버명
+** window_start - size collection window 시작 시간
+** window_duration - size collection window 지속 시간
+** sample_interval - relation size가 수집된 두 sample 사이의 최소 시간 간격
+
+*예시* +
+[source,sql]
+----
+SELECT set_server_size_sampling('local','23:00+03',interval '2 hour',interval '8 hour');
+----
+
+[source,sql]
+----
+postgres=# SELECT * FROM show_servers_size_sampling();
+
+ server_name | window_start | window_end  | window_duration | sample_interval
+-------------+--------------+-------------+-----------------+-----------------
+ local       | 23:00:00+03  | 01:00:00+03 | 02:00:00        | 08:00:00
+----
+
+relation size 데이터가 부족한 sample 간에 report를 작성할 때 growth관련 section은 pg_class.relpages 데이터를 기반으로 작성됩니다. relation size 데이터가 충분할 경우에는 report 생성 함수의 with_growth 매개변수가 수집된 relation size 데이터를 사용해 가장 가까운 sample로 보고서 경계를 확장합니다.
+
+=== sample
+모든 sample에는 이전 sample 이후의 데이터베이스 workload에 대한 통계 정보가 포함되어 있습니다.
+
+* sample 함수
+** take_sample() - server_enabled = TRUE인 모든 서버에 대한 sample을 수집합니다. 하나씩 순차로 가져오고, 함수는 테이블을 반환합니다. +
+server - result - elapsed 로 결과가 표기되며 server에는 서머명, result에는 정상이면 ok 오류면 텍스트가 표기되며, elapsed에는 sample 채취 경과 시간이 표기됩니다.
+
+** take_sample_subset([sets_cnt integer], [current_set integer]) - 활성화된 서버의 하위 집합에 대한 sample을 수집합니다. sets_cnt는 서버의 하위집합의 수를, current_set은 [0]과 [sets_cnt 갯수 -1] 사이의 값을 사용하여 처리할 하위 집합입니다. 함수는 테이블을 반환합니다.
+
+** take_sample(server name, [skip_sizes boolean]) - 지정된 서버에 대한 sample을 수집합니다. skip sizes는 서버 관계 크기 수집 정책을 재정의 합니다. skip_size 인수가 생략되거나 null로 설정된 경우에만 정책이 적용됩니다.
+
+** show_samples([server name,] [days integer]) - days에 지정된 날(생략된 경우 모든 sample)까지의 서버명(생략된 경우 local서버)을 포함하는 테이블을 반환합니다. +
+sample - sample_time - sizes_collected - dbstats_reset - clustats_reset - archstats_reset 순으로 결과가 표시되며 sample은 샘플 식별자(순번), sample_time은 샘플을 가져온 시간, sizes_collected는 모든 관계 크기가 collectid인경우 표기, 이하 reset 값들은 일반적으로 null 값이지만 이전 샘플 이후 발생했다면 pg_stat_database, pg_stat_bgwriter, pg_stat_archiver 통계 재설정 타임 스탬프가 포함됩니다.
+
+* sample 채취 +
+report를 작성하려면 최소 2개의 sample을 작성해야 합니다. 빈번한 sample 생성은 필요하지 않고 일반적으로 시간당 하나 또는 두개의 sample이 필수적이라고 공식문서에 소개됩니다. cron으로 샘플 스케줄링을 거는 것을 권장하고 있으며 예시는 아래와 같습니다.
+
+[source,sql]
+----
+    */30 * * * *   psql -c 'SELECT profile.take_sample()' > /dev/null 2>&1
+----
+
+* sample 데이터 보존 +
+3가지 정책으로 보존합니다.
+** postgresql.conf에서 pg_profile.max_sample_age 설정
+** 서버 생성 시 서버 max_sample_age 설정을 정의하거나 기존 서버에 set_server_max_age() 함수 사용
+** 아래에 소개될 baseline을 만들어서 보존. 우선 순위가 가장 높은 샘플의 보존기간을 무시합니다.
+
+* sample 채취 타이밍
+postgresql.conf에서 pg_profile.track_sample_timings 매개변수가 켜져 있을 때 타이밍 통계를 취하는 자세한 샘플을 수집 합니다. 결과는 v_sample_timings 뷰에서 볼 수 있습니다.
+** v_sample_timing 필드
+- server_name - sampling된 서버 이름
+- sample_id - sample 식별자
+- sample_time - sample을 가져온 시간
+- event - sample 채취 단계
+- sample_spent - 이벤트에 소요된 시간
+
+
+=== baseline
+baseline은 고유한 보존 설정이 있는 명명된 sample sequence입니다. baseline은 report 작성 기능에서 sample 간격으로 사용할 수 있습니다. 또한 특정 기간의 데이터베이스 workload에 대한 정보를 저장할 수 있습니다. 예를 들면, 부하 테스트 중 또는 시스템의 일반 부하 주에 수집된 sample을 저장 할 수 있습니다. 그리고 정의가 안되어 있으면 무제한 보존을 의미합니다.
+
+* create_baseline([server name,] baseline_name varchar(25), start_id integer, end_id integer [, days integer]) +
+baseline을 생성하며 인자값은 다음과 같습니다.
+** server - 서버명, 생략시 local 서버
+** baseline_name - baseline이름, 각 baseline은 서버 내에서 고유해야합니다.
+** start_id / end_id - baseline에 포함된 첫번째 sample / 마지막 sample
+** days - 기준 보존 시간. now() 이후 정수 일수로 정의됩니다. 생략시 무제한 유지 됩니다.
+
+* create_baseline([server name,] baseline_name varchar(25), time_range tstzrange [, days integer]) +
+baseline을 생성하며 time range로도 인자값을 받을 수 있습니다.
+** time_range - 기준 시간 간격으로, baseline에는 이 간격과 겹치는 사용 가능한 모든 샘플이 포함됩니다.
+
+* drop_baseline([server name,] name varchar(25)) +
+baseline을 삭제하며 server와 baseline name을 인자값으로 주고 삭제하며, baseline이 삭제되면 기준 정의만 삭제될 뿐 지정된 sample들은 삭제되지 않습니다.
+
+* keep_baseline([server name,] name varchar(25) [, days integer]) +
+baseline 보존 일자를 변경합니다.
+
+* show_baselines([server name]) +
+baseline 을 호출하여 정보를 얻습니다.
+[source,sql]
+----
+    postgres=# SELECT * FROM profile.show_baselines();
+----
+
+=== data export 및 import
+수집된 sample은 pg_profile extension 인스턴스에서 export하고 다른 인스턴스에서 import 할 수 있습니다.
+
+*export* +
+export_data() 함수에 의해 일반 테이블로 추출됩니다. 
+
+* export_data([server name, [min_sample_id integer,] [max_sample_id integer]] [, obfuscate_queries boolean]) +
+
+- server - 서버명
+- min_sample_id 및 max_sample_id - 경계 sample 식별자를 포함해서 export합니다. 각 null을 포함할 수 있으며 min id가 null 일경우 max까지의 모든값, max가 null일 경우 min 이후 모든 값이 추출됩니다.
+- obfuscate_queries - 쿼리 텍스트를 숨기려는 경우에 사용되며, MD5 해시값으로 추출됩니다. 
+
+* 예시
+[source,sql]
+postgres=# \copy (select * from export_data()) to 'export.csv'
+
+*import* +
+데이터는 로컬 테이블에서만 가져올 수 있으므로 이전에 내보낸 데이터를 별도 테이블 생성하여 먼저 로드해야 합니다.
+
+[source,sql]
+----
+    postgres=# CREATE TABLE import (section_id bigint, row_data json);
+    CREATE TABLE
+    postgres=# \copy import from 'export.csv'
+    COPY 6437
+----
+
+이후 import_data() 함수로 데이터 import를 수행할 수 있습니다.
+
+[source,sql]
+----
+    postgres=# SELECT * FROM import_data('import');
+----
+
+* import_data(data regclass) +
+data - 별도 생성해 데이터를 로드한 테이블을 넣어주면 그 데이터를 반환합니다.
+
+=== report
+report는 html 마크업으로 생성됩니다. 
+
+* 하나의 간격 통계정보를 보는 정기보고서 
+
+* 두 간격의 데이터를 비교하는 차등보고서
+
+*정기 보고 기능* +
+
+* get_report([server name,] start_id integer, end_id integer [, description text [, with_growth boolean]]) - sample id로 보고서 생성 +
+
+* get_report([server name,] time_range tstzrange [, description text [, with_growth boolean]]) - time_range를 포함하는 가장 짧은 샘플 간격에 대한 보고서 생성 +
+
+* get_report([server name], baseline varchar(25) [, description text [, with_growth boolean]]) - baseline을 사용햐여 보고서 생성 +
+
+* get_report_latest([server name]) - 두 개의 최신 sample 함수 인수에 대한 보고서 생성 +
+
+** server - 서버 이름, 생략시 local 서버
+** start_id - 시작 sample id
+** end_id - 종료 sample id
+** time_range - 시간 범위(tstzrange 유형)
+** baseline - baseline 이름
+** with_growth - 관계 성장 데이터를 사용해 가장 가까운 범위로 간격 확장을 요청하는 플래그. default는 fale
+** description - 설명으로 보고서에 포함
+
+
+*차등 보고 기능* +
+sample id, baseline 및 시간 범위를 간격 경계로 사용하여 차등 보고서 생성합니다.
+
+* get_diffreport([server name,] start1_id integer, end1_id integer, start2_id integer, end2_id integer [, description text [, with_growth boolean]]) - sample id로 두 간격에 대한 차등 보고서 생성
+* get_diffreport([server name,] baseline1 varchar(25), baseline2 varchar(25) [, description text [, with_growth boolean]]) - baseline 이름으로 정의된 두 간격에 대한 차등 보고서 생성
+* get_diffreport([server name,] time_range1 tstzrange, time_range2 tstzrange [, description text [, with_growth boolean]]) - 시간 범위로 정의된 두 간격에 대한 차등 보고서 생성
+
+
+*예시* +
+
+* 기본 예시
+[source,sql]
+----
+$ psql -Aqtc "SELECT profile.get_report(480,482)" -o report_480_482.html
+----
+
+* 서버가 다를 경우
+[source,sql]
+----
+$ psql -Aqtc "SELECT profile.get_report('omega',12,14)" -o report_omega_12_14.html
+----
+
+* 시간 범위 이용할 경우
+[source,sql]
+----
+$ psql -Aqtc "select profile.get_report(tstzrange('2020-05-13 11:51:35+03','2020-05-13 11:52:18+03'))" -o report_range.html
+----
+
+== pg_profile report section 별 볼 수 있는 기능
+* Server statistics +
+https://github.com/zubkov-andrei/pg_profile/blob/master/doc/pg_profile.md#server-statistics
+
+* SQL query statistics +
+https://github.com/zubkov-andrei/pg_profile/blob/master/doc/pg_profile.md#sql-query-statistics
+
+* Schema object statistics +
+https://github.com/zubkov-andrei/pg_profile/blob/master/doc/pg_profile.md#schema-object-statistics
+
+* User function statistics +
+https://github.com/zubkov-andrei/pg_profile/blob/master/doc/pg_profile.md#user-function-statistics
+
+* Vacuum-related stats +
+https://github.com/zubkov-andrei/pg_profile/blob/master/doc/pg_profile.md#vacuum-related-stats
+
+* Cluster settings during the report interval +
+https://github.com/zubkov-andrei/pg_profile/blob/master/doc/pg_profile.md#cluster-settings-during-the-report-interval

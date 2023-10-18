@@ -1,0 +1,241 @@
+= powa
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== powa 개요
+
+powa(postgresql workload analyzer)는 stats 관련 다양한 extension에서 postgresqel 인스턴스에 대한 통계를 수집, 집계할 수 있습니다.
+사용되는 extension은 아래와 같습니다.
+
+* btree_gist : index suggestion에서 인덱스 구성시 사용
+* pg_stat_statement : 실행 중인 쿼리에 대한 데이터 제공
+* pg_qualstats : predicates 또는 where 절에 대한 데이터 제공
+* pg_stat_kcache : 운영 체제 수준 캐시에 대한 데이터 제공
+* pg_wait_sampling : wait event에 대한 데이터 제공
+* pg_track_settings : 인스턴스에서 발생하는 구성 변경사항을 추적
+* hypoPG : 가상 인덱스를 생성하고 실제 인덱스를 생성하지 않고도 그 유용성을 테스트 가능
+
+이 중에서 pg_track_settings는 설치 시 필수 요소는 아니고 선택사항입니다. 그리고 hypoPG는 클러스터 내 모든 데이터베이스에 설치가 되어야하고, hypoPG를 제외한 나머지는 powa 전용 repository 데이터베이스에 설치하면 됩니다.
+
+powa의 구성은 아래와 같습니다.
+
+* powa-archivist : 통계를 수집하는 extension
+* powa collector : powa 전용 repository 서버와 원격으로 통신하는 postgresql 인스턴스에서 성능 메트릭을 수집하는 데몬
+* powa-web : powa 수집 메트릭에 대한 그래픽 사용자 인터페이스
+* stat extension : 데이터의 실제 소스
+* powa : 이들을 포함하는 전체 프로젝트명
+
+이 구성요소 중에서는 stat extension과 powa-archivist와 powa-web을 설치하면 바로 사용이 가능합니다.
+
+원격 인스턴스 구성은 선택사항읿니다.
+
+== powa 특징
+
+* powa는 성능 지표를 분석한다기보다 모니터링에 가까운 툴입니다. 
+* web UI 인터페이스에 그래프로 현황을 확인(per sec단위)할 수 있으며(pgadmin처럼 실시간 움직이는 그래프는 아님) 서버/데이터베이스/쿼리 별로 세부적으로 확인 할 수 있습니다.
+* 또한 데이터베이스/쿼리의 세부현황 확인(call count, runtime, block read/hit/dirtied/written, temp block 확인, i/o time, wal records, wal FPI, wal bytes 등) , 데이터베이스/쿼리의 wait event 확인도 가능합니다.
+* 서버 레벨에서는 general overview, wals, background writer, data objects, system resources, wait events 항목으로 모니터링 가능합니다.
+* 데이터베이스 레벨에서는 general overview, wals, data objects, system resources, wait events 항목으로 모니터링 가능합니다.
+* 쿼리 레벨에서는 query detail, wals, pg cache, i/o, system resources, wait events, predicates 항목으로 모니터링 가능합니다.
+
+** general overview : +
+*모든 데이터베이스의 query runtime per second 그래프 확인*(plantime per sec, queries per sec, runtime per sec, avg runtime) +
+*block access in bps 그래프 확인*(total hit, total system cache hit, total disk read) +
+
+** wals : +
+*wal activity 그래프 확인*(wal bytes, wal fpi count, wal records count)
+
+** background writer : +
+*checkpoint scheduling 그래프 확인*(number of requested checkpoints, number of scheduled checkpoints) +
+*checkpoint activity 그래프 확인*(buffers alloc, buffers checkpoint, sync time, write time) +
+*backgroud writer 그래프 확인*(maxwritten clean, buffers clean) +
+*backends 그래프 확인*(buffers backend fsync, buffers backend)
+
+** database objects : +
+*access pattern 그래프 확인*(index scans ratio, index scans, sequential scans) + 
+*DML activity 그래프 확인*(tuples inserted, updated, hot updated, deleted count) +
+*vacuum activity 그래프 확인*(vacuum count, autovacuum count, analyze count, autoanalyze count)
+
+** system resources : +
+*system resources(events per sec) 그래프 확인*(involuntary context switches, voluntary context switches, soft page faults, hard page faults)
+
+** wait events : +
+*wait events(per second) 그래프 확인*(I/O, Timeout, IPC, Extension, Client, Activity, Buffer pin, lock, Lightweight lock) + 
+*query 레벨에서는 summary 제공*
+
+** query detail : +
+*그래프 확인*(avg plantime, call count, rows count, avg runtime)
+
+** pg cache : +
+*shared block(in bps) 그래프 확인*(shared written, dirtied, hit, read) +
+*locak block(in bps) 그래프 확인*(local written, dirtied, hit, read) +
+*temp block(in bps) 그래프 확인*(temp written, read)
+
+** I/O : +
+*hit ratio 그래프 확인*(dist hit ratio, system cache hit ratio, shared buffers hit ratio) +
+*read/write time 그래프 확인*(write, read time) +
+*physical block(in bps) 그래프 확인*(physical writes, read) +
+*cpu time repartition 그래프 확인*(CPU other time/ query time, CPU system time/ query time, CPU user time/ query time)
+
+** predicates : +
+*predicates used by this query* : 그래프 형식이 아니고 predicate의 avg filter_ratio 및 execution count 확인가능
+
+* powa는 다양한 extension을 기반으로 index suggestion이라는 항목을 통해 database optimize를 위한 가상 인덱스를 제공합니다.
+
+* powa는 web ui 환경에서 시간대를 조정해 과거 시간대 현황도 분석 가능합니다. 분석은 powa repository database 테이블에 스냅샷 형태로 저장되는(default 5분간격) 데이터를 기반으로 진행됩니다.
+
+* query는 모든 query를 보여주긴하나 top query만 빼서 따로 볼 수는 없습니다. 하지만 web ui에서 항목을 클릭하면 정렬이 가능하기 때문에 이로 가장 실행시간이 높거나, hit율이 낮은 쿼리등을 찾을 수 있습니다.
+
+== powa 설치
+
+powa는 postgresql 9.4 이상에서 사용가능하며, 아래 두 가지 기본 설치가 되어있으면 사용 가능합니다.
+
+* powa-archivist - pgdg 패키지(red hat, centos 6/7, debian) 또는 소스를 통해 설치 +
+* powa-web - pgdg 패키지(red hat, centos 6/7, debian) 또는 python pip을 통해 설치
+
+*패키지 설치*
+
+전제조건 + 
+postgresql이 설치가 되어있어야 하며 web ui를 설치하기 위한 방화벽이 오픈되어있음
+
+powa-archivist
+
+* pgdg repo 패키지 확인 후 없으면 설치 진행
+[source, bash]
+----
+yum install https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+----
+
+* pg contrib 패키지 확인 후 없으면 설치 진행
+[source, bash]
+----
+yum install postgresql14-contrib
+----
+
+* extension 패키지 설치
+[source, bash]
+----
+yum install powa_14, pg_qualstats14 pg_stat_kcache_14 hypopg_14 pg_wait_sampling_14 pg_track_settings_14
+----
+
+* postgresql.conf에 extension 세팅
+shared_preload_libraries='pg_stat_statements,powa,pg_stat_kcache,pg_qualstats,pg_wait_sampling'
+
+    pg_track_settings는 포함하지 않음
+
+* postgresql restart
+[source, bash]
+----
+systemctl restart postgresql-14
+----
+
+* 슈퍼유저로 postgresql powa repository DB 생성
+[source, sql]
+----
+create database powa;
+----
+
+* powa respository DB에 extension 설치
+[source, sql]
+----
+\c powa
+CREATE EXTENSION pg_stat_statements;
+CREATE EXTENSION btree_gist;
+CREATE EXTENSION powa;
+CREATE EXTENSION pg_qualstats;
+CREATE EXTENSION pg_stat_kcache;
+CREATE EXTENSION pg_wait_sampling;
+CREATE EXTENSION pg_track_settings;
+----
+
+
+* 클러스터 내 모든 데이터베이스에 hypopg 설치
+[source, sql]
+----
+create extension hypopg;
+----
+
+* 슈퍼 유저 권한 및 클러스터 모든 DB에 로그인 가능한 role 생성
+(web ui로 powa repository db 접속을 이 계정으로 진행)
+[source, sql]
+----
+create role powa superuser login password '패스워드설정';
+----
+
+
+powa-web
+
+* pgdg repo 패키지 확인 후 없으면 설치 진행
+[source, bash]
+----
+yum install https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+----
+
+* powa-web yum 설치
+[source, bash]
+----
+yum install powa_14-web
+----
+
+* /etc/powa-web.conf 생성 후 접속정보 세팅
+[source, bash]
+----
+servers={
+  'main': {
+    'host': 'localhost',
+    'port': '5432',
+    'database': 'powa' 
+  }
+}
+cookie_secret="SUPERSECRET_THAT_YOU_SHOULD_CHANGE"
+----
+
+* pg_hba.conf로 외부에서 접속 가능하도록 편집
+
+* powa-web 실행 +
+[source, bash]
+----
+powa-web
+----
+
+그냥 실행하면 백그라운드로 돌리는 것이 아니기 때문에, nohup powa-web & 으로 실행하는것을 추천. 기동/종료 쉘이 따로 있지않기때문에 쉘로 만드는 것도 추천(종료는 kill -9 명령어로 수행)
+
+*소스 설치*
+
+소스설치는 공식 홈페이지 참조
+https://powa.readthedocs.io/en/latest/quickstart.html#build-and-install-powa-archivist-from-the-sources
+
+*원격지 설정*
+
+원격 설정 및 개념 설명은 공식 홈페이지 참조
+https://powa.readthedocs.io/en/latest/remote_setup.html#remote-setup
+
+== powa 사용
+
+=== postgresql.conf 에 powa 매개변수 세팅 +
+
+- powa.frequency : default 5분. 스냅샷의 빈도를 지정하며, 기본 단위인 밀리초 또는 postgresql에서 지원하는 시간 단위로 정의. 최소 5초이며, -1로 설정하면 powa 비활성됨.(실행은 되지만 수집하지 않고 DB에 연결도 하지않음)
+
+- powa.retention : default 1일. 이 값보다 오래된 데이터를 자동으로 제거하는 기능으로, 기본 단위는 분
+
+- powa.database : default powa. workload repository 데이터베이스를 정의
+
+- powa.coalesce : default 100. 테이블에서 함께 그룹화할 레코드의 양을 정의
+
+=== powa-web 접속 +
+
+powa-web을 실행했다면, 8888번 포트로 linstening이 됩니다. 웹브라우저에서 http://localhost:8888/ 로 접속하여 powa 설치 중 생성한 슈퍼유저 ID - PASSWORD를 넣고 /etc/powa-web.conf에 넣었던 서버명 선택 후 로그인합니다.
+
+=== powa-web UI 관련 +
+
+우측 상단에 날짜와 시간이 나와있는데, 현재 기준으로 시간/일/주/월 단위로 단위조정을 쉽게 할 수 있습니다. 또한 세부적으로 원하는 기간의 날짜와 시간을 조정하면 그 당시의 모니터링 지표도 확인할 수 있습니다.
+단, 과거 기록 데이터는 powa.retention 매개변수 기준으로 남아있습니다.
+
+query 레벨로 보게되면, Index suggestions라는 항목이 있는데, <optimize this database!>를 클릭하게 되면, pg_qualstats와 hypopg를 이용해 누락된 인덱스에 대한 제안을 표시해줍니다. 가상인덱싱으로 만들어져서, I/O 및 디스크 공간소비에 신경쓰지 않고 유용성을 판단할 수 있습니다. 다만, pg_qualstats의 쿼리 sampling에 대한 의존도가 크기 때문에, postgresql에 세팅해야하는 pg_qualstats 매개변수 중, pg_qualstats.sample_rate 값을 조정하지 못하면 제안을 하지 못할 수 있습니다. 공식 홈페이지에서는 pg_qualstats.sample_rate = 1로 하게되면 모든 쿼리를 sampling하도록 구성할 수 있지만, 재기동 및 성능에 영향을 미치게되어 유의하라고 소개되어 있습니다.
+
+
+== powa가 성능에 미치는 영향
+
+powa를 사용하면 postgresql 서버 성능에 약간의 부정적인 영향을 미칠 수 있습니다. extension들을 다수 사용하고 있어, 부정적인 영향이 어디에서 발생하는지 정확하게 평가하기 어려울 수 있습니다. 여러 extension 중 필수 적인 요소는 pg_stat_statements이며, 다른 extension들을 추가할 수록 구성방법(postgresql.conf에 extension들의 매개변수 설정)에 따라 인스턴스 속도를 늦출 수 있습니다. 그 뿐만 아니라, 원격지 설정을 하지 않으면 데이터는 정기적으로 대상 서버에 저장되기 때문에 스냅샷 빈도에 따라 오버헤드가 중요할 수 있습니다. 그리고 web ui를 사용하면 데이터베이스에 대한 쿼리도 실행됩니다. 되도록 원격 설정을 사용해 대상 데이터베이스에서 ui 관련 쿼리가 실행되지 않도록 해야합니다.

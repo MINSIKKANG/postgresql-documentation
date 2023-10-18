@@ -1,0 +1,158 @@
+= Documentation for HyperSQL-PostgreSQL
+:toc:
+:toc-title:
+:sectnums:
+
+HyperSQL-PostgreSQL의 문서들을 제공하는 Repository입니다.
+
+== 지원 사항
+ * HyperSQL- PostgreSQL은 Postgresql-14 기준으로 지원합니다.(2022.06.10 기준)
+
+== 검증 환경
+
+* OS
+ ** CentOS Linux release 7.6.1810 (Core)
+* Binary
+ ** postgres (PostgreSQL) 14.2
+ ** pg_ctl (PostgreSQL) 14.2
+ ** psql (PostgreSQL) 14.2
+* OpenSource
+ ** barman version 2.19
+ ** bucardo version 5.6.0
+ ** pgBackrest version 2.3.9
+ ** pgpool-II-pg11 4.3.1
+ ** pgbadger version 11.7
+ ** pgbouncer 1.17.0
+ ** pgAdmin4 version 6.8
+ ** slony-i verison 2.2.10
+ ** ora2pg version 12.2
+
+== 문서 목차
+=== admin
+[width="500%"]
+|====================
+|xref:./docs/admin/Backup/README.adoc[Backup] | Backup 문서
+|xref:./docs/admin/Logging/README.adoc[Logging] | Logging 문서
+|xref:./docs/admin/Parameter/README.adoc[Parameter] | Parameter 문서
+|xref:./docs/admin/Release/README.adoc[Release] | Release 문서
+|xref:./docs/admin/Restore/README.adoc[Restore] | Restore 문서
+|xref:./docs/admin/Upgrade/README.adoc[Upgrade] | Upgrade 문서
+|====================
+
+=== cloud_enviroment
+[width="500%"]
+|====================
+|xref:./docs/cloud_enviroment/Docker/README.adoc[Docker] | Docker 문서
+|xref:./docs/cloud_enviroment/Kubernetes/README.adoc[Kubernetes] | Kubernetes 문서
+|====================
+
+=== command
+[width="500%"]
+|====================
+|xref:./docs/command/initdb/README.adoc[initdb] | initdb 문서
+|xref:./docs/command/pg_basebackup/README.adoc[pg_basebackup] | pg_basebackup 문서
+|xref:./docs/command/pg_dump/README.adoc[pg_dump] | pg_dump 문서
+|xref:./docs/command/pg_dumpall/README.adoc[pg_dumpall] | pg_dumpall 문서
+|xref:./docs/command/pg_restore/README.adoc[pg_restore] | pg_restore 문서
+|xref:./docs/command/pg_upgrade/README.adoc[pg_upgrade] | pg_upgrade 문서
+|xref:./docs/command/pgbench/README.adoc[pgbench] | pgbench 문서
+|xref:./docs/command/psql/README.adoc[psql] | psql 문서
+|====================
+
+=== extension
+[width="500%"]
+|====================
+|xref:./docs/extension/pg_agent/README.adoc[pg_agent] | pg_agent 문서
+|xref:./docs/extension/pg_cron/README.adoc[pg_cron] | pg_cron 문서
+|xref:./docs/extension/pg_partman/README.adoc[pg_partman] | pg_partman 문서
+|xref:./docs/extension/bgw_replstatus/README.adoc[bgw_replstatus] | bgw_replstatus 문서
+|xref:./docs/extension/pg_stat_statements/README.adoc[pg_stat_statements] | pg_stat_statements 문서
+|xref:./docs/extension/pgaudit/README.adoc[pgaudit] | pgaudit 문서
+|xref:./docs/extension/pgcrypto/README.adoc[pgcrypto] | pgcrypto 문서
+|xref:./docs/extension/postgis/README.adoc[postgis] | postgis 문서
+|xref:./docs/extension/postgres_fdw/README.adoc[postgres_fdw] | postgres_fdw 문서
+|xref:./docs/extension/dblink/README.adoc[dblink] | dblink 문서
+|====================
+
+=== install
+[width="500%"]
+|====================
+|xref:./docs/install/README.adoc[Install] | HyperSQL-PostgreSQL 표준 설치 문서
+|xref:./docs/install/Replication/README.adoc[Replication Install] | Replication 설치 문서
+|====================
+
+=== interface
+[width="500%"]
+|====================
+|xref:./docs/interface/.NET/README.adoc[.NET] | .NET interface 문서
+|xref:./docs/interface/DB_link/README.adoc[DB_link] | DB_link 문서
+|xref:./docs/interface/Go/README.adoc[Go] | Go 문서
+|xref:./docs/interface/JDBC/README.adoc[JDBC] | JDBC 문서
+|xref:./docs/interface/node.js/README.adoc[node.js] | node.js 문서
+|xref:./docs/interface/ODBC/README.adoc[ODBC] | ODBC 문서
+|xref:./docs/interface/Perl/README.adoc[Perl] | Perl 문서
+|xref:./docs/interface/Python/README.adoc[Python] | Python 문서
+|xref:./docs/interface/TCL/README.adoc[TCL] | TCL 문서
+|====================
+
+=== internal
+[width="500%"]
+|====================
+|xref:./docs/internal/Analyze/README.adoc[Analyze] | Analyze 문서
+|xref:./docs/internal/BackgroundWriter/README.adoc[BackgroundWriter] | BackgroundWriter 문서
+|xref:./docs/internal/Checkpointer/README.adoc[Checkpointer] | Checkpointer 문서
+|====================
+
+=== sql
+[width="500%"]
+|====================
+|xref:./docs/sql/Partition%20Table/README.adoc[Partition Table] | Partition Table 문서
+|xref:./docs/sql/VACUUM/README.adoc[VACUUM] | VACUUM 문서
+|====================
+
+=== Opensource Tool
+|====================
+|xref:./barman/README.adoc[pg_barman] | Backup & Restore하기 위한 Opensource
+|xref:./pgBackrest/README.adoc[pgBackrest] |pgBackrest
+|xref:./bucardo/README.adoc[bucardo] | Multi-Active 구성을 위한 Opensource
+|xref:./pgbadger//README.adoc[pgbadger] | Monitoring을 위한 Opensource
+|xref:./ora2pg/README.adoc[ora2pg] | Migration 구성을 위한 Opensource
+|xref:./pgAdmin4/README.adoc[pgAdmin4] |
+|xref:./pgbouncer/README.adoc[pgbouncer] | Connection Pool을 관리하기 위한 Opensourc
+|xref:./pgpool/README.adoc[pgpool] | HA 구성을 위한 Opensourcee
+|xref:./slony-i/README.adoc[slony-i] | slony-i
+|====================
+
+
+== PostgreSQL 제약사항
+PostgreSQL 공식 문서 참조
+[width="500%", options="header"]
+|====================
+|Item|Upper Limit| Comment
+|Database size|Unlimited|
+|Number of databases|4,294,950,911|
+|Relations per database|1,431,650,303|
+|Relation size|32 TB|with the default BLCKSZ of 8192 bytes
+|Rows per table|Limited by the number of tuples that can fit onto 4,294,967,295 pages|
+|Columns per table|1600|Further limited by tuple size fitting on a single page
+|Filed size|1 GB|
+|Identifier length|63 bytes|can be increased by recompiling PostgreSQL
+|Indexes per table|Unlimited|constrained by maximum relations per database
+|Columns per index|32|Can be increased by recompiling PostgreSQL
+|Partition keys|32|Can be increased by recompiling PostgreSQL
+|====================
+== PostgreSQL Client Interfaces
+[width="500%", options="header"]
+|====================
+|Name |Language | Comments | Website
+|DBD::Pg	|Perl	|Perl DBI driver	|https://metacpan.org/release/DBD-Pg
+|JDBC|	Java|	Type 4 JDBC driver	|https://jdbc.postgresql.org/
+|libpqxx	|C++	| C++ interface	|https://pqxx.org/
+|node-postgres|	JavaScript|	Node.js driver|	https://node-postgres.com/
+|Npgsql|	.NET	|.NET data provider|https://www.npgsql.org/
+|pq|	Go|	Pure Go driver for Go's database/sql	|https://github.com/lib/pq
+|psqlODBC|	ODBC|	ODBC driver|	https://odbc.postgresql.org/
+|psycopg	|Python|	DB API 2.0-compliant|	https://www.psycopg.org/
+|pgtcl|	Tcl	|	|https://github.com/flightaware/Pgtcl
+|pgtclng|	Tcl|	|	https://sourceforge.net/projects/pgtclng/
+|====================

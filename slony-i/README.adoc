@@ -1,0 +1,190 @@
+= pgbouncer
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+이 문서는 slony-i 2.2.10 버전, PostgreSQL 14.2 버전으로 작성되었습니다.
+
+== slony-i 개요
+
+- 공식 사이트 : https://www.slony.info/
+
+slony-i는 cascading 및 slave 승격을 지원하는 PostgreSQL Master-Multi Slave Replication 시스템입니다.
+
+=== 주요 기능
+1. 다른 PostgreSQL Major 버전 간에 데이터를 복제할 수 있습니다.
+2. 하드웨어 또는 OS간에 데이터를 복제할 수 있습니다.
+3. 일부 테이블만 Slave에 복제가 가능합니다.
+4. 일부 테이블을 한 슬레이브로 복제하고, 다른 테이블을 다른 슬레이브로 복제할 수 있습니다.
+5. 서로 다른 데이터베이스 서버가 다른 테이블의 Master가 될 수 있습니다.
+
+=== 시스템 요구 사항
+- PostgreSQL : v8.3 이상 (이전 버전은 slony-i 1.2.x 버전)
+- 소스 또는 바이너리 패키지에서 컴파일된 slony-i 바이너리 파일
+
+
+== slony-i 개념
+
+다음의 개념을 이해해야 합니다.
+
+[%header,cols="2,7"]
+|====================
+|개념| 설명
+|Cluster| PostgreSQL 데이터베이스의 인스턴스 집합
+|Node| Replication에 관련된 PostgreSQL 데이터베이스
+|Replication Set| Node간에 복제될 테이블 및 시퀀스의 집합
+|Origin| 유일하게 테이블의 데이터를 수정할 수 있는 Origin Node, "Master Provider"라고도 부름
+|Providers and Subscribers| 복제의 주체가 되는 Provider, 그 복제를 받는 Subscribers
+|slon daemons| Replication(복제) 이벤트를 처리하는 데몬(Configuration Event, Sync Event)
+|slonik configuration processor| slony-i의 구성을 업데이트하기 위해 "little language" 스크립트로 처리하는 프로세서, 노드추가 / 통신경로 수정 / Subscription 추가 및 제거 등
+|====================
+
+Cluster는 Cluster name과 namespace가 있는 slony-i Node Set을 가집니다.
+
+== slony-i Test
+1. Yum repository 설정 및 설치 +
+slony-i 패키지는 PostgreSQL에 따라 변경되므로 PostgreSQL의 버전에 맞는 패키지를 설치한다. +
+[source, bash]
+yum install https://download.postgresql.org/pub/repos/yum/reporpms/EL-7-x86_64/pgdg-redhat-repo-latest.noarch.rpm
+yum install slony1_$PGVERSION
++
+
+PATH는 버전에 따라 상이할 수 있습니다. +
+
+- config file : /etc/slony1-$PGVERSION
+- binary file : /usr/pgsql-$PGVERSION/bin
+- library file : /usr/pgsql-$PGVERSION/lib
+- doc file : /usr/share/doc/slony1_$PGVERSION-$SLONVERSION
+
+2. 환경변수 설정 +
+Replication User를 설정할 때 Super User가 아닐 경우에는 여러가지 설정이 필요할 수 있습니다.  +
+Master 및 Slave의 Host를 원격의 서버로 변경할 때, 둘 중 한 Node라도 localhost로 작성하면 오류가 납니다. `ERROR remoteListenThread_1: db_getLocalNodeId() returned 2 - wrong database?` +
+[source,bash]
+export slony="on"
+#slony-i ENV
+if [ ${slony} == "on" ]; then
+    export CLUSTERNAME=slony_example
+    export MASTERDBNAME=pgbench
+    export SLAVEDBNAME=pgbenchslave
+    export MASTERHOST=localhost
+    export SLAVEHOST=localhost
+    export REPLICATIONUSER=pgsql
+    export PGBENCHUSER=pgbench
+fi
+
+3. DB User 생성
+[source, bash]
+createuser -SRD $PGBENCHUSER
+createuser -s $REPLICATIONUSER
+
+4. Master, Slave Database 생성
+[source,bash]
+createdb -O $PGBENCHUSER -h $MASTERHOST $MASTERDBNAME
+createdb -O $PGBENCHUSER -h $SLAVEHOST $SLAVEDBNAME
+pgbench -i $MASTERDBNAME -U $PGBENCHUSER -h $MASTERHOST -s 1
++
+slony-i 는 적절한 primary key를 가지고 있어야하므로 pgbench_history에 생성하여 줍니다.
+[source,bash]
+psql -U $PGBENCHUSER -h $MASTERHOST -d $MASTERDBNAME -c "begin; alter table
+pgbench_history add column id serial; update pgbench_history set id =
+nextval('pgbench_history_id_seq'); alter table pgbench_history add primary key(id);
+commit;"
++
+slony-i는 pl/pgSQL Procedure Language 데이터베이스에 의존하기 때문에 설치합니다.(PostgreSQL v9.0 이하)
+[source,bash]
+createlang -h $MASTERHOST plpgsql $MASTERDBNAME
++
+slony-i 는 Slave node가 생성될 때 자동으로 테이블 스키마를 만들어주지 않기 때문에 pg_dump를 이용하여 스키마를 복사해줍니다.
+[source,bash]
+pg_dump -s -U $REPLICATIONUSER -h $MASTERHOST $MASTERDBNAME | psql -U $REPLICATIONUSER -h $SLAVEHOST $SLAVEDBNAME
+
+5. slonik build
+[source,bash]
+vi slonik_build.sh
+#!/bin/sh
+SLONDIR=$PGHOME/$PGVERSION/slony-i
+mkdir -p $SLONDIR/conf
+mkdir -p $SLONDIR/logs
+CONF=$SLONDIR/conf/slon_tools.conf
+cat << EOF > $CONF
+\$CLUSTER_NAME = 'slony_example';
+\$LOGDIR = '$SLONDIR/logs';
+\$PIDFILE_DIR = '$SLONDIR';
+\$MASTERNODE = 1;
+EOF
+slonik_build_env -node $MASTERHOST:$MASTERDBNAME:$REPLICATIONUSER -node $SLAVEHOST:$SLAVEDBNAME:$REPLICATIONUSER >> $CONF
+cat << EOF >> $CONF
+\$SLONY_SETS = {
+    "set1" => {
+        "set_id" => 1,
+        "table_id" => 1,
+        "sequence_id" => 1,
+        "pkeyedtables" => @PKEYEDTABLES,
+        "sequences" => @SEQUENCES,
+    }
+}
+EOF
+
+6. build 실행
+[source,bash]
+sh +x slonik_build.sh
+
+7. 생성된 slon_tools.conf 내용 수정
+[source,bash]
+@PKEYEDTABLES=(테이블들 이름)
+# 테이블들 이름 보고 이하 @PKEYEDTABLES 부분에 아래와 같이 수정 후 저장
+$SLONY_SETS = {
+    "set1" => {
+        "set_id" => 1,
+        "table_id" => 1,
+        "sequence_id" => 1,
+        "pkeyedtables" => [테이블명, 테이블명, ...],
+        "sequences" => @SEQUENCES,
+    }
+}
+
+
+8. initailize cluster - slony schema 및 table 생성
+[source, bash]
+slonik_init_cluster --config=$PGHOME/$PGVERSION/slony-i/conf/slon_tools.conf | slonik
+
+- 설치된 스키마 삭제
+[source, bash]
+psql -U pgsql -d pgbench -c "drop schema _slony_example cascade
+psql -U pgsql -d pgbenchslave -c "drop schema _slony_example cascade
+
+9. table 연동할 set 생성
+[source, bash]
+slonik_create_set --config=$PGHOME/$PGVERSION/slony-i/conf/slon_tools.conf 1 | slonik
+
+
+10. slon 시작
+[source,bash]
+slon_start --config=$PGHOME/$PGVERSION/slony-i/conf/slon_tools.conf 1
+slon_start --config=$PGHOME/$PGVERSION/slony-i/conf/slon_tools.conf 2
+
+11. data 연동 시작
+[source,bash]
+slonik_subscribe_set --config=$PGHOME/$PGVERSION/slony-i/conf/slon_tools.conf 1 2 | slonik
+
+12. switch over 테스트
++
+node1 <-> node2 에 대해 master / slave 역할 바꾸기(node1, node2 아무데서나 가능)
++
+[source,bash]
+slonik_move_set --config=$PGHOME/$PGVERSION/slony-i/conf/slon_tools.conf 1 1 2 | slonik
++
+원복시에는 인자 값 순서 변경
++
+[source,bash]
+slonik_move_set --config=$PGHOME/$PGVERSION/slony-i/conf/slon_tools.conf 1 2 1 | slonik
+
+13. fail over 테스트
++
+node1을 dead node라 가정하고 수행
++
+[source,bash]
+slonik_failover --config=$PGHOME/$PGVERSION/slony-i/conf/slon_tools.conf 1 2| slonik
+
+

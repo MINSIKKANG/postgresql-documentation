@@ -1,0 +1,473 @@
+= repmgr
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+
+== repmgr 개요
+
+- 공식 사이트 : https://repmgr.org/
+- 최신 repmgr Documentation : https://repmgr.org/docs/current/index.html
+
+PostgreSQL 서버 클러스터에서 replication 및 장애 조치를 관리하기 위한 오픈 소스 Tool 모음입니다. Standby 서버를 설정하고, replication를 모니터링하고, failover 또는 switchover와 같은 관리 작업을 수행하는 도구로 PostgreSQL의 Hot-standby 기능을 향상시킵니다.
+
+repmgr는 PostgreSQL 9.0에 이후에 도입된 내장 replication 메커니즘에 대한 고급 지원을 제공합니다. 현재 repmgr 시리즈인 repmgr 5 는 replication 프로토콜을 통한 cascading replication, timeline switching 및 기본 백업과 같은 PostgreSQL 9.3에서 도입된 replication 기능들을 지원합니다.
+
+EDB에서 개발한 오픈 소스입니다. 라이센스 link:https://www.gnu.org/licenses/gpl-3.0.html[GNU Public License(GPL)v3] 무료 오픈 소스 소프트웨어입니다.
+
+=== repmgr 개념
+
+- replication cluster +
+repmgr 문서에서 `replication cluster`는 streaming replication로 연결된 PostgreSQL 서버의 네트워크를 나타냅니다.
+
+- node +
+node는 replication cluster 내의 단일 PostgreSQL 서버입니다.
+
+- upstream node +
+streaming replication를 수신하기 위해 standby 서버가 연결하는 node입니다. 이것은 primary 서버이거나 cascading replication의 경우 다른 standby 서버입니다.
+
+- failover +
+이것은 primary 서버가 실패하고 적절한 standby가 새로운 primary 서버로 승격되는 경우 발생하는 작업입니다. repmgrd 데몬은 자동 failover를 지원 하여 down time을 최소화합니다.
+
+- switchover +
+하드웨어 또는 운영 체제 유지 관리와 같은 특정 상황에서는 primary 서버를 오프라인으로 전환해야 합니다. 이 경우 적절한 standby가 승격되고 기존 primary가 제어된 방식으로 replication cluster 에서 제거되는 제어된 switchover가 필요합니다. repmgr command line 클라이언트는 이 기능을 제공합니다 .
+
+- fencing +
+failover 상황에서는 새 standby 서버가 primary로 승격된 후 이전 primary 서버가 예기치 않게 다시 온라인 상태가 되어 split brain 상황이 발생하지 않도록 하는 것이 중요합니다. 이를 방지하려면 장애가 발생한 Primary 서버를 응용 프로그램에서 격리해야 합니다(예: fenced off).
+
+- witness 서버 +
+repmgr 은 하나 이상의 standby가 있는 failover 상황에서 새 primary 서버를 결정하는 데 도움이 되도록 소위 "witness 서버"를 설정하는 기능을 제공합니다. witness server 자체는 replication cluster의 일부가 아니지만 repmgr 메타데이터 스키마의 복사본이 포함되어 있습니다.
++
+witness 서버의 목적은 replication cluster의 서버가 둘 이상의 위치에 분할되는 "casting vote"를 제공하는 것입니다. 서로 다른 위치의 서버가 연결이 끊긴 경우 witness 서버의 존재 여부에 따라 해당 위치의 서버가 primary 서버로 승격되는지 여부가 결정됩니다. 이는 격리된 위치에서 네트워크 중단을 (원격의)Primary와 승격된(로컬의)Standby에 대한 "split brain" 상황을 방지하기 위한 것입니다.
++
+witness 서버 는 repmgrd 가 ​​사용 중인 경우에만 생성하면 됩니다.
+
+=== repmgr 구성
+repmgr 단일 Read/Write Primary 서버와 Standby 서버 데이터베이스의 거의 실시간 복사본을 포함하는 하나 이상의 Read 전용 Standby를 제공하는 PostgreSQL의 streaming replication 지원하고 향상시킵니다. 두 가지 주요 도구를 제공합니다.
+
+- repmgr +
+다음과 같은 관리 작업을 수행하는 데 사용되는 명령줄 도구:
+ * standby 서버 설정
+ * standby 서버를 Primary 서버로 승격
+ * primary 및 standby 서버 전환(switching)
+ * replication cluster 내의 서버 상태 표시
+- repmgrd +
+replication cluster의 서버를 능동적으로 모니터링하고 다음 작업을 수행하는 데몬:
+ * replication 성능 모니터링 및 기록
+ * primary 서버의 장애를 감지하고 가장 적합한 standby 서버를 승격하여 failover 수행
+ * 이메일로 경고 보내기와 같은 작업을 수행할 수 있는 사용자 정의 스크립트에 클러스터의 이벤트에 대한 알림 제공
+
+ 
+=== repmgr user 및 메타데이터
+replication cluster 효과적으로 관리하기 위해 repmgr은 클러스터의 서버에 대한 정보를 전용 데이터베이스 스키마에 저장해야 합니다. 
+
+==== Tables
+- repmgr.events: records events of interest
+- repmgr.nodes: replication cluster의 각 서버에 대한 연결 및 상태 정보
+- repmgr.monitoring_history: repmgrd 가 ​​작성한 이력 대기 모니터링 정보
+
+==== Views
+- repmgr.show_nodes: repmgr.nodes 테이블을 기반으로 upstream node의 이름을 추가로 표시
+- repmgr.replication_status: repmgrd의 모니터링이 활성화된 경우 각 standby에 대한 현재 모니터링 상태
+
+repmgr 메타데이터 스키마 는 기존 데이터베이스 또는 자체 전용 데이터베이스에 저장할 수 있습니다. repmgr 메타데이터 스키마 는 repmgr 에서 관리하는 복제 클러스터의 일부가 아닌 데이터베이스 서버에 상주할 수 없습니다. +
+데이터베이스 사용자는 repmgr 데이터베이스에 접근 권한 및 변환할 수 있는 권한을 가지고 있어야합니다. 이 사용자는 슈퍼유저일 필요는 없지만 repmgr extension의 초기 설치와 같은 일부 작업에는 수퍼유저 연결이 필요합니다(필요한 경우 명령줄 옵션으로 지정할 수 있음 --superuser).
+
+== repmgr 설치
+
+=== 호환성 metrics
+repmgr 5.3.2 기준으로 PostgreSQL 9.4 버전 이후는 모두 지원합니다.
+
+|=============================
+|repmgr version| 지원 여부?| 최근 release|	지원되는 PostgreSQL version
+|repmgr 5.3|	YES|	5.3.2 (2022-05-25)|	9.4, 9.5, 9.6, 10, 11, 12, 13, 14
+|repmgr 5.2|	NO|	5.2.1 (2020-12-07)|	9.4, 9.5, 9.6, 10, 11, 12, 13
+|repmgr 5.1|	NO|	5.1.0 (2020-04-13)|	9.3, 9.4, 9.5, 9.6, 10, 11, 12
+|repmgr 5.0|	NO|	5.0 (2019-10-15)|	9.3, 9.4, 9.5, 9.6, 10, 11, 12
+|repmgr 4.x|	NO|	4.4 (2019-06-27)|	9.3, 9.4, 9.5, 9.6, 10, 11
+|repmgr 3.x|	NO|	3.3.2 (2017-05-30)|	9.3, 9.4, 9.5, 9.6
+|repmgr 2.x|	NO|	2.0.3 (2015-04-16)|	9.0, 9.1, 9.2, 9.3, 9.4
+|=============================
+
+=== repmgr 패키지 설치
+현재 link:https://dl.enterprisedb.com/[EDB 공용 리포지토리]는 RedHat/CentOS 버전 6,7 및 8에 대한 지원을 제공합니다.
+
+==== Repository pull
+[source,bash]
+-----
+curl https://dl.enterprisedb.com/default/release/get/14/rpm | sudo bash
+-----
+
+==== Repository list 검증
+[source,bash]
+-----
+yum repolist
+-----
+
+* 결과 +
+[source,bash]
+-----
+2ndquadrant-dl-default-release-pg14/7/x86_64			2ndQuadrant packages (PG14) for 7 - x86_64                                                                             37
+2ndquadrant-dl-default-release-pg14-debug/7/x86_64		2ndQuadrant packages (PG14) for 7 - x86_64 - Debug                                                                      6
+-----
+
+==== repmgr 설치
+이 문서는 14버전을 기준으로 설치합니다.
+-----
+yum install repmgr14
+-----
+
+==== source code 링크(참고)
+- 현재 버전 repmgr tar 파일 다운로드 : https://repmgr.org/
+- 이전 버전 repmgr tar 파일 다운로드 : https://repmgr.org/downloads.html
+- source code 설치 방법 : https://repmgr.org/docs/current/installation-source.html
+
+
+
+== repmgr 시작하기
+
+=== 시작하기 전 전제조건
+- PostgreSQL 설치
+ * 서버는 기본적으로 primary 서버, standby 서버가 있다는 것을 가정합니다.
+
+그리고 PostgreSQL 서버에는 모두 다음과 같은 설정이 필요합니다.
+
+- repmgr 설치(PostgreSQL 주버전과 호환이 맞는 버전)
+- PostgreSQL 포트(ex. 5432)는 양방향으로 통신이 가능한 상태여야 합니다.
+- switchover 기능 
+ * 두 서버간 암호가 필요없이 ssh 연결이 가능한 상태
+ * rsync 설치
+
+
+=== PostgreSQL 설정
+
+-----
+#repmgr
+max_wal_senders = 10
+max_replication_slots = 10
+wal_level = 'replica'
+hot_standby = on
+archive_mode = on
+archive_command = '/bin/true'
+-----
+
+- max_wal_senders +
+연결할 standby 서버보다 1개 더 설정합니다.
+
+- max_replication_slots +
+replication slot을 사용한다면 standby에 연결할 최소한 하나 이상으로 설정합니다. +
+repmgr에서 replication slot을 사용한다면 repmgr.conf에 "user_replication_slots"를 "ture"로 설정합니다. +
+만약 replicatioin slot을 사용하지 않을 경우에는 0으로 설정합니다.
+
+- wal_level +
+ * PostgreSQL 9.5 이하 : 'hot_standby' 또는 'logical'
+ * PostgreSQL 9.6 이상 : 'replica' 또는 'logical'
+
+- hot_standby +
+standby 서버에서 읽기 전용 쿼리 활성화, primary 서버에서는 무시되기 때문에 switchover가 되는 경우를 생각하여 같이 활성화하는 것이 좋습니다.
+
+- archive_mode +
+WAL 파일 archive
+
+- archive_command +
+해당 예에서는 archive command를 더미 명령으로 설정합니다.
+
+=== Streaming Replication 설정
+==== repmgr User 및 데이터베이스 생성
+[source,sql]
+-----
+CREATE USER repmgr WITH REPLICATION PASSWORD 'repmgr' SUPERUSER;
+CREATE DATABASE repmgr OWNER repmgr;
+-----
+이 문서에서는 간단하게 하기 위해 repmgr 사용자를 superuser로 생성됩니다. 일반 사용자로 repmgr 사용자를 생성할 수 있습니다 . 그러나 특정 작업에는 superuser 권한이 필요합니다. 이 경우 명령줄 옵션 --superuser 을 제공하여 superuser를 지정할 수 있습니다.
+
+그리고 다음과 같이 repmgr 유저에 대해서 search_path를 설정하면 view를 보는데 편합니다.
+[source,sql]
+-----
+ALTER USER repmgr SET search_path TO repmgr, "$user", public;
+-----
+
+==== replication slot 생성
+[source,sql]
+-----
+SELECT * FROM pg_create_physical_replication_slot('replication_slot1');
+-----
+
+- 조회 +
+[source,sql]
+-----
+postgres=# SELECT slot_name, slot_type, active FROM pg_replication_slots;
+     slot_name     | slot_type | active 
+-------------------+-----------+--------
+ replication_slot1 | physical  | f
+(1 row)
+-----
+
+==== pg_hba.conf 설정
+primary 서버와 standby 서버가 연결될 수 있도록 설정되어 있는지 확인합니다.
+
+[]
+-----
+local   replication   repmgr                              trust
+host    replication   repmgr      127.0.0.1/32            trust
+host    replication   repmgr      192.168.1.0/24          trust
+local   repmgr        repmgr                              trust
+host    repmgr        repmgr      127.0.0.1/32            trust
+host    repmgr        repmgr      192.168.1.0/24          trust
+-----
+
+==== standby 서버 설정
+standby 서버에는 initdb를 생성하지 않습니다. repmgr이 복제해줄 cluster 디렉토리를 생성합니다. (0700)
+그리고 primary 서버에 psql로 접속할 수 있는지 확인합니다.
+
+-----
+psql 'host=[primary서버 IP] user=repmgr dbname=repmgr connect_timeout=2'
+-----
+
+
+=== repmgr.conf 파일 설정
+`repmgr.conf` 파일을 생성합니다. 생성 후 다음과 같이 파라미터를 설정합니다. 해당 파라미터는 필수적으로 사용되는 파라미터들입니다. +
+`repmgr.conf` 은 PostgreSQL 서버를 설정하거나 다시 초기화할 때 덮어쓸 수 있으므로 PostgreSQL Cluster 디렉토리 내부에 저장해서는 안 됩니다.
+-----
+node_id=1            #greater than zero
+node_name='node1'    #max length 63 ASCII character
+conninfo='host=[IP] user=repmgr dbname=repmgr connect_timeout=2'
+data_directory='/hypersql/pg/14/data'  
+-----
+
+repmgr.conf.sample 정보는 link:https://raw.githubusercontent.com/EnterpriseDB/repmgr/master/repmgr.conf.sample[해당 링크]를 참조 바라며, +
+conninfo의 정보는 link:https://www.postgresql.org/docs/current/libpq-connect.html[해당 링크] 를 참조 바랍니다.
+
+=== Primary 서버 등록
+primary 서버를 등록하기 전에 primary 서버를 실행합니다.
+-----
+repmgr -f repmgr.conf primary register
+-----
+
+=== cluster 상태 확인
+-----
+repmgr -f repmgr.conf cluster show
+-----
+
+- 결과 +
+[source,bash]
+-----
+ ID | Name  | Role    | Status    | Upstream | Location | Priority | Timeline | Connection string                                         
+ ----+-------+---------+-----------+----------+----------+----------+----------+------------------------------------------------------------
+ 1  | node1 | primary | * running |          | default  | 100      | 1        | host=localhost user=repmgr dbname=repmgr connect_timeout=2
+-----
+
+
+내부 테이블로 조회할 수도 있습니다.
+
+[source,bash]
+-----
+psql -U repmgr -d repmgr -c "SELECT * FROM repmgr.nodes;"
+node_id | upstream_node_id | active | node_name |  type   | location | priority |                          conninfo                          | repluser | slot_name
+ |         config_file         
+---------+------------------+--------+-----------+---------+----------+----------+------------------------------------------------------------+----------+----------
+-+-----------------------------
+       1 |                  | t      | node1     | primary | default  |      100 | host=localhost user=repmgr dbname=repmgr connect_timeout=2 | repmgr   |          
+ | /hypersql/pg/14/repmgr.conf
+(1 row)
+-----
+
+=== Standby 서버 복제
+
+Standby 서버에도 `repmgr.conf` 을 생성합니다.
+-----
+node_id=2
+node_name='node2'
+conninfo='host=[standby IP] user=repmgr dbname=repmgr connect_timeout=2'
+data_directory='/var/lib/postgresql/data'
+-----
+
+다음 명령어로 standby서버에 복제될 수 있는지 확인할 수 있습니다.
+-----
+repmgr -h localhost -U repmgr -d repmgr -f repmgr_standby.conf standby clone --dry-run
+-----
+
+- 결과 +
+[source,bash]
+-----
+NOTICE: destination directory "/hypersql/pg/14/data_standby" provided
+INFO: connecting to source node
+DETAIL: connection string is: host=localhost user=repmgr dbname=repmgr
+DETAIL: current installation size is 1288 MB
+INFO: "repmgr" extension is installed in database "repmgr"
+INFO: replication slot usage not requested;  no replication slot will be set up for this standby
+INFO: parameter "max_wal_senders" set to 10
+NOTICE: checking for available walsenders on the source node (2 required)
+INFO: sufficient walsenders available on the source node
+DETAIL: 2 required, 10 available
+NOTICE: checking replication connections can be made to the source server (2 required)
+INFO: required number of replication connections could be made to the source server
+DETAIL: 2 replication connections required
+WARNING: data checksums are not enabled and "wal_log_hints" is "off"
+DETAIL: pg_rewind requires "wal_log_hints" to be enabled
+NOTICE: standby will attach to upstream node 1
+HINT: consider using the -c/--fast-checkpoint option
+INFO: would execute:
+  pg_basebackup -l "repmgr base backup"  -D /hypersql/pg/14/data_standby -h localhost -p 5432 -U repmgr -X stream 
+INFO: all prerequisites for "standby clone" are met
+-----
+
+해당 결과에 문제가 없다면 standby 서버를 복제 및 등록합니다.
+
+-----
+repmgr -h localhost -U repmgr -d repmgr -f repmgr_standby.conf standby clone
+-----
+
+- 결과 +
+[source,bash]
+-----
+NOTICE: destination directory "/hypersql/pg/14/data_standby" provided
+INFO: connecting to source node
+DETAIL: connection string is: host=localhost user=repmgr dbname=repmgr
+DETAIL: current installation size is 1288 MB
+INFO: replication slot usage not requested;  no replication slot will be set up for this standby
+NOTICE: checking for available walsenders on the source node (2 required)
+NOTICE: checking replication connections can be made to the source server (2 required)
+WARNING: data checksums are not enabled and "wal_log_hints" is "off"
+DETAIL: pg_rewind requires "wal_log_hints" to be enabled
+INFO: checking and correcting permissions on existing directory "/hypersql/pg/14/data_standby"
+NOTICE: starting backup (using pg_basebackup)...
+HINT: this may take some time; consider using the -c/--fast-checkpoint option
+INFO: executing:
+  pg_basebackup -l "repmgr base backup"  -D /hypersql/pg/14/data_standby -h localhost -p 5432 -U repmgr -X stream 
+NOTICE: standby clone (using pg_basebackup) complete
+NOTICE: you can now start your PostgreSQL server
+HINT: for example: pg_ctl -D /hypersql/pg/14/data_standby start
+HINT: after starting the server, you need to register this standby with "repmgr standby register"
+-----
+
+==== Standby 서버 실행 및 등록
+
+primary서버에서 복제를 pg_basebackup을 통해 복제하기 때문에 파라미터 설정이 달라져야 할 수도(log_directory, port, pg_hba.cof 등) 있습니다. 해당 파라미터를 수정 후에 실행합니다.
+
+-----
+pg_ctl start
+-----
+standby에서 제대로 replication이 되는지 확인하고 싶다면 `SELECT * FROM pg_stat_wal_receiver;` 쿼리를 통해 확인합니다.
+
+정상적으로 standby가 실행됬다면 repmgr에 등록합니다.
+-----
+repmgr -f repmgr_standby.conf standby register
+-----
+
+그리고 repmgr로 node들이 정상적으로 등록되었는지 확인합니다.
+
+-----
+repmgr -f repmgr.conf cluster show
+-----
+
+- 결과 +
+[source,bash]
+-----
+ ID | Name  | Role    | Status    | Upstream | Location | Priority | Timeline | Connection string                                                   
+----+-------+---------+-----------+----------+----------+----------+----------+----------------------------------------------------------------------
+ 1  | node1 | primary | * running |          | default  | 100      | 1        | host=192.168.0.8 user=repmgr dbname=repmgr connect_timeout=2          
+ 2  | node2 | standby |   running | node1    | default  | 100      | 1        | host=192.168.0.9 user=repmgr dbname=repmgr connect_timeout=2
+-----
+
+
+== repmgr 기능들
+
+=== repmgr 사용하여 standby 서버 승격
+
+- primary 서버 중지
+-----
+pg_ctl stop
+-----
+
+- cluster 상태 확인
+-----
+[hypersql@Clean-test-VM:14]$ repmgr -f repmgr_standby.conf cluster show
+ ID | Name  | Role    | Status        | Upstream | Location | Priority | Timeline | Connection string                                                   
+----+-------+---------+---------------+----------+----------+----------+----------+----------------------------------------------------------------------
+ 1  | node1 | primary | ? unreachable | ?        | default  | 100      |          | host=localhost user=repmgr dbname=repmgr connect_timeout=2          
+ 2  | node2 | standby |   running     | ? node1  | default  | 100      | 1        | host=localhost port=5434 user=repmgr dbname=repmgr connect_timeout=2
+-----
+
+- standby primary로 승격
+-----
+repmgr -f repmgr.conf standby promote
+-----
+
+=== repmgr을 사용한 follow primary
+
+- primary 서버 중지
+
+새로운 primary를 follow하기 위한 조건이 있습니다.
+
+1) primary 서버가 실행중 +
+2) follow할 standby 서버가 실행중
+
+- 해당 standby가 새로운 primary 서버로 follow하는 명령어
+-----
+repmgr -f repmgr.conf standby follow
+-----
+
+==== Option
+
+- `--dry-run` +
+옵션을 사용하여 follow 여부를 미리 확인할 수 있습니다.
+
+- `--upstream-node-id` +
+follow 할 upstream node를 따로 설정할 수 있습니다.
+
+- `-w`, `--wait` +
+아직 follow할 primary 서버가 동작 중이 아닐 경우에 기다릴 때 사용합니다. `primary_follow_timeout`(기본값 : 60초)만큼 기다립니다. 이 값은 `repmgr.conf` 에서 설정할 수 있습니다.
+
+==== 종료 코드
+- SUCCESS (0) +
+후속 작업이 성공했습니다. 또는 --dry-run제공된 경우 후속 작업을 방해하는 문제가 감지되지 않았습니다.
+
+- ERR_BAD_CONFIG (1) +
+repmgr 이 후속 작업을 계속 하지 못하게 하는 구성(config) 문제가 감지되었습니다.
+
+- ERR_NO_RESTART (4) +
+노드를 다시 시작할 수 없습니다.
+
+- ERR_DB_CONN (6) +
+repmgr이 노드 중 하나에 대한 데이터베이스 연결을 설정할 수 없습니다.
+
+- ERR_FOLLOW_FAIL (23) +
+repmgr이 다음 명령을 완료할 수 없습니다.
+
+
+=== repmgr을 사용한 switchover
+선택한 standby를 primary로 승격시키고 현재 primary를 강등시켜 standby로 만드는 작업입니다.
+SSH 연결이 암호없이 이루어질 수 있도록 설정이 필요합니다.
+
+- primary 서버에 동작할 start/stop/restart 명령어 조회 + 
+
+[source,bash]
+-----
+repmgr -f repmgr.conf node service --list-actions --action=stop
+repmgr -f repmgr.conf node service --list-actions --action=start
+repmgr -f repmgr.conf node service --list-actions --action=restart
+-----
+이 명령어들은 service_start_command, service_stop_command, service_restart_command를 통해 설정할 수 있습니다. +
+이것은 systemctl로 PostgreSQL을 사용할 때 적절한 명령어로 변경하는 것을 권장합니다.
+
+그리고 switchover 과정에서 WAL파일을 archive하는 과정이 있다면 종료될 때까지 PostgreSQL 서버는 종료되지 않습니다. +
+다음 명령어를 통해서 현재 pending 되어있는 상태의 WAL를 볼 수 있습니다.
+-----
+repmgr -f repmgr.conf node check --archive-ready
+-----
+
+- ssh 설정 +
+통신해야하는 서버와 ssh를 설정합니다.
+-----
+ssh-keygen
+scp id_rsa.pub []@./ssh/authorzied_keys/.
+-----
+
+`--siblings-follow` 는 강등된 primary 서버가 새로운 primary 서버를 따를 수 있도록 설정하는 것입니다.
+
+- standby 서버에 switchover가 가능한지 확인
+-----
+repmgr standby switchover -f repmgr.conf --siblings-follow --dry-run 
+-----

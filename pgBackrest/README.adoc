@@ -1,0 +1,647 @@
+= pgBackrest
+:toc:
+:toc-title: 목차
+
+== 1. pgBackrest 개요
+안정성과 쉬운 백업 및 복원에 초첨을 둔 오픈소스 툴입니다. + 
+대규모 데이터베이스에 스케일업을 원활하게 도와주고, 유틸라이징 알고리즘을 이용해서 백업 및 복구에 대한 부하를 최적화 시켜줍니다. + 
+ + 
+아래는 전체적인 기능에 대한 요약 설명입니다.
+
+[width=500, cols="3,7", options=header]
+|===
+|기능|설명
+|Parallel Backup & Resotre| 백업, 복원시에 멀티 코어 사용을 지원합니다. 따라서, 더욱 빠른 백업 및 복원을 시도할 수 있습니다.
+|Local or Remote Operation| pgBackrest만의 커스텀 프로토콜을 이용해서 로컬, 원격 환경 모두에서 백업, 복원 그리고 WAL 아카이브가 가능합니다. PostgreSQL에 쿼리가 가능한 인터페이스 또한 지원됩니다.
+|Multiple Repositories| 여러개의 저장소를 지원합니다. 예를들어, PostgreSQL과 같은 서버에는 빠른 복원을 위한 작은 저장소, 그리고 원격 서버에 있는 저장소에는 유사시를 대비한 모든 백업을 하는 방식으로도 구성이 가능합니다. 또한 한개의 저장소를 가지고 다수의 PostgreSQL 서버의 저장소로 사용이 가능합니다.
+|Various type of Backup| pgBackrest는 풀백업, 증분백업, 차등백업 모두를 지원하며 rsync를 사용하지 않기 때문에 timestamp 이슈가 없습니다.
+|Backup Rotation & Archive Expiration| 백업 정책을 설정 함으로써, 백업 파일의 기간을 지정할 수 있으며, Archive 된 WAL 파일 또한 최근 기간에 대해서만 백업할 수 있도록 필요한 WAL 파일만 보관하도록 정책을 설정할 수 있습니다.
+|Backup Integrity| 모든 백업 파일은 Checksum 값을 계산하여 저장하고, 복원시에 한번 더 체크하도록 합니다. 백업이 파일 복사를 끝낸 후에, 백업 일관성을 유지하는데 필요한 모든 WAL이 저장소에 올 때 까지 기다립니다.
+|Page Checksum| PostgreSQL에서 지원하는 Page 수준의 Checksum을 이용해서, 백업되는 모든 파일에 대한 Checksum의 유효성을 검사합니다. Full 백업에서는 모든 페이지의 Checksum, 증분 및 차등 백업에서는 변경된 파일에 대해서만 Checksum을 검증합니다.
+검증에 실패할 경우, 유효성 검사에 실패한 경우에 대한 세부 정보를 console 및 log에 출력해주며 백업은 멈추지 않습니다.
+|Backup Resume| 백업이 중단될 경우 중단된 시점에서 다시 시작할 수 있습니다. 중단되기 전에 복사된 파일은 무결성을 보장하기 위해, Manifest 파일에 저장된 Checksum 값을 비교합니다. 백업 서버에서 수행할 수 있는 작업이므로, 모든 데이터를 다시 전송하는 것 보다 부하를 줄이고 속도를 향상 시킬 수 있습니다.
+|Streaming Compression & Checksum| 압축 및 파일의 Checksum 계산은 저장소에 저장되는 동안 Stream에서 수행됩니다. 압축이 비활성화 될 경우, CPU 사용량을 최소화 하면서 대역폭을 효율적으로 사용하도록 합니다.
+|Delta Restore| 백업된 모든 파일에 대한 Checksum 값이 기록되어 있는 Manifest 파일을 이용하여, 복원시에 Checksum 값이 Manifest의 Checksum 값과 동일할 경우 동일한 파일로 간주하여, 복원을 건너뛰기 때문에 복원에 걸리는 시간을 단축할 수 있습니다.
+|Parallel, Asynchronous WAL push & get| WAL 파일을 아카이브로 보내고, 가져오는 작업은 병렬 처리를 지원합니다. 또한 비동기적으로 작업하여 빠른 응답 시간을 제공합니다. 또한, WAL push & get 작업시에, PostgreSQL 버전 및 시스템 식별자를 비교해서 데이터베이스와 저장소가 일치하지 않는 경우를 예방합니다.
+|Support Tablespace & Link| 테이블스페이스를 복원시에 Location을 다른 곳으로 매핑 하거나, 한 Location으로 모든 테이블스페이스를 맵핑할 수 있습니다. Link는 클러스터의 모든 파일, 디렉토리에 대해 지원됩니다. 링크 또한 다시 매핑하거나 일반 파일 또는 디렉토리로 복원할 수 있습니다.
+|Cloud Object Storage 지원| Amazon S3, Azure, GCS 등의 스토리지를 저장소로 사용할 수 있습니다.
+|Encryption| 저장소를 암호화 하여 보호할 수 있습니다.
+|Compatibility with PostgreSQL| PostgreSQL 9.0 버전부터 지원되는 폭 넓은 호환성을 가집니다.
+|===
+
+=== 용어 정리
+[width=300, cols="2,8",options=header]
+|===
+|용어|설명
+|full backup| 백업 시점의 데이터베이스 클러스터의 모든 파일을 백업합니다.
+|differential backup| 마지막 Full backup의 내용과 다른 변경된 내용만 백업합니다.
+|incremental backup| 마지막 백업(모든 종류)에서 변경된 내용만 백업합니다.
+|stanza| pgbackrest의 log가 적재되는 디렉토리
+|===
+
+==== 라이센스
+*MIT License* + 
+A short and simple permissive license with conditions only requiring preservation of copyright and license notices. Licensed works, modifications, and larger works may be distributed under different terms and without source code
+
+== 2. 설치
+
+=== 2.1 설치요구사항
+[width 300, options=header]
+|===
+|백업 서버 필요 라이브러리
+|make
+|gcc
+|postgresql-libs
+|postgresql-devel
+|openssl-devel
+|libxml2-devel
+|lz4-devel
+|libzstd-devel
+|bzip2-devel
+|libyaml-devel
+|===
+`*sudo yum install make gcc postgresql-libs postgresql-devel openssl-devel libxml2-devel lz4-devel libzstd-devel bzip2-devel libyaml-devel*`
+
+[width 300, options=header]
+|===
+|PostgreSQL 운영 서버 필요 라이브러리
+|postgresql-libs
+|openssl-devel
+|libxml2-devel
+|lz4-devel
+|libzstd-devel
+|bzip2-devel
+|libyaml-devel
+|===
+`*sudo yum install postgresql-libs openssl-devel libxml2-devel lz4-devel libzstd-devel bzip2-devel libyaml-devel*` + 
+ + 
+추가적으로, 백업 서버와 PostgreSQL 운영 서버간에 SSH authentication key 등록이 필요합니다. + 
+
+=== 2.2 설치
+==== 설치 환경
+pgBackrest 서버와 PostgreSQL 운영 서버는 서버를 분리하여 설치 하였습니다. + 
+pgBackrest 서버는 백업서버, PostgreSQL 서버는 postgres 운영 서버라고 용어를 정하여 설치 가이드를 작성하였습니다. + 
+ + 
+
+pgBackrest 바이너리는 백업 서버와 postgres 운영 서버 양쪽에 모두 필요합니다. + 
+pgBackrest 공식 문서 기준으로, 바이너리를 빌드하고 복사하여 사용하라고 되어있습니다. + 
+ + 
+이 문서에서는, 백업 서버에서 pgBackrest를 빌드 하는 것을 기준으로 작성하였습니다.
+
+
+*백업 서버*
+|=======
+| OS | CentOS 7.6
+| CPU | 4 Cores
+| MEM | 8 GB
+| pgBackrest Version | 2.39
+|=======
+
+*Postgres 운영 서버*
+|=======
+| OS | CentOS 7.6
+| CPU | 4 Cores
+| MEM | 8 GB
+| PostgreSQL Version | PostgreSQL 14.3
+|=======
+
+==== 다운로드 및 빌드
+[source, sh]
+----
+useradd -b /hypersql/backup/
+# sudoers에 pgbackrest 유저를 등록하여 진행하였으나, 등록 과정은 이 문서에서는 생략 하겠습니다.
+su - pgbackrest
+
+wget https://github.com/pgbackrest/pgbackrest/archive/release/2.39.tar.gz
+
+tar xvzf 2.39.tar.gz
+cd pgbackrest-release-2.39
+sudo ./configure && make
+sudo cp pgbackrest /usr/pgsql-14/bin
+sudo chown pgbackrest:pgbackrest /usr/pgsql-14/bin/pgbackrest
+chmod 700 /usr/pgsql-14/bin/pgbackrest
+
+sudo scp pgbackrest postgres@pg서버ip:pg바이너리 디렉토리
+----
+
+== 3. 설정
+=== 3.1 공통 설정
+Backup서버와 Postgres 운영 서버 모두 공통으로 적용해야 하는 설정입니다.
+
+[source, sh]
+----
+sudo mkdir -p -m 770 /var/log/pgbackrest # pgBackrest 로그 디렉토리 생성
+sudo chown postgres:postgres /var/log/pgbackrest # 로그 디렉토리 권한 부여
+sudo mkdir -p /etc/pgbackrest # pgBackrest Config파일 디렉토리 생성
+sudo mkdir -p /etc/pgbackrest/conf.d # 추가로 Include할 Config파일을 저장하는 디렉토리
+sudo touch /etc/pgbackrest/pgbackrest.conf # pgBackrest의 Main Configuration 파일
+sudo chmod 640 /etc/pgbackrest -R # 권한 설정
+sudo chown postgres:postgres /etc/pgbackrest/pgbackrest.conf # 소유권 설정
+----
+
+[width=300, options=header]
+|===
+|디렉토리 및 파일|설명
+|/var/log/pgbackrest| pgbackrest의 log가 적재되는 디렉토리
+|/etc/pgbackrest| pgbackrest의 config 파일이 적재되는 디렉토리
+|/etc/pgbackrest/conf.d| config 파일과 같이 참조되는 디렉토리
+|pgbackrest.conf| pgbackrest의 main config 파일, pg 운영 서버 및 저장소(stanza)에 대한 관리(백업 정책 등)를 설정하는 파일 
+|===
+
+=== 3.2 백업 서버 설정 (예시)
+`*vi /etc/pgbackrest/pgbackrest.conf*`
+[source, sh]
+----
+[pgserver] (특정 서버에 대해서만 설정)
+pg1-host=pg1.host.com (PostgreSQL 운영서버 host)
+pg1-host-user=postgres (PostgreSQL 운영 서버 OS유저, SSH key pair가 등록되어야 합니다)
+pg1-port=5432 (PostgreSQL 운영 서버에 접속시 )
+pg1-path=/hypersql/pg/data (Database Cluster data 디렉토리)
+
+[global] (전역 설정)
+repo1-path=/hypersql/backup/pgbackrest/archive (Backup 및 WAL archiving시에 데이터가 저장될 디렉토리)
+repo1-retention-full=2 (FullBackup 최대 저장 갯수 정책 설정)
+start-fast=y (백업 시작 시 강제로 CHECKPOINT 수행 여부)
+log-level-console=info (console에 출력되는 log-level)
+log-level-file=debug (file로 저장 되는 log-level)
+----
+
+=== 3.3 PostgreSQL 운영 서버 설정 (예시)
+[source, sh]
+.pgBackrest 바이너리 설정
+----
+sudo chown pg운영계정:pg운영계정 /usr/pgsql-14/bin/pgbackrest
+chmod 700 /usr/pgsql-14/bin/pgbackrest
+----
+
+*pgbackrest configuration* + 
+`*vi /etc/pgbackrest/pgbackrest.conf*`
+[source, sh]
+----
+[pgserver]
+pg1-path=/hypersql/pg/data
+
+[global]
+log-level-console=info
+log-level-file=debug
+repo1-host=172.27.0.200
+repo1-host-user=pgbackrest
+----
+
+*postgresql configuration* + 
+`*vi /hypersql/pg/data/postgresql.conf*`
+[source, sh]
+----
+# 기존의 archive_command를 아래와 같이 변경합니다.
+archive_command = 'pgbackrest --stanza=pgserver archive-push %p' 
+----
+
+== 4. Configuration
+
+=== 4.1 Configuration 개요
+*[global]* + 
+저장소 위치, 권장되는 설정, 보존 정책등이 설정되는 섹션입니다. + 
+모든 저장소에 공통으로 적용할 정책을 설정합니다. + 
+ + 
+*[pgserver]* + 
+임의로 정해준 Stanza명이며, Stanza 섹션이라고 합니다. +  
+하나의 저장소의 개념이라고 볼 수 있습니다. + 
+global 섹션 이외에 서버에 따라 다른 정책을 적용할 수 있습니다. + 
+global 섹션과 중복되는 설정 내용이 있을 경우, Stanza의 설정이 우선시 됩니다. + 
+ + 
+백업 서버를 따로 구성할시에 백업 서버와 운영 서버 Configuration시 같은 stanza이름을 사용하여야 합니다. + 
+
+=== Configuration List
+설정에서 True는 y , False는 n으로 사용됩니다. + 
+Ex) archive-async=y
+
+==== *Archive Options*
+- `archive-async` + 
+** 기본값 :  n + 
+** WAL segment를 비동기로 주고 받습니다. + 
+** archive-get / archive-push 실행 시에 영향을 주는 옵션입니다.
+** 이 옵션을 활성화 할 경우, 커넥션을 재사용 할 수 있고, 병렬 작업이 가능하기 때문에 자원 및 속도 측면에서 효율적입니다.
+** 연관된 옵션으로는 `spool-path`, `archive-get-queue-max`, `archive-push-queue-max`가 있습니다.
+
+- `archive-get-queue-max` + 
+** 기본값 : 128MiB + 
+** 설정 가능 범위 : 0(byte) - 4PiB + 
+** archive-get 큐의 최대 사이즈를 지정합니다. + 
+** archive-async 옵션이 활성화 될 경우 사용 되는 옵션입니다.
+** 큐는 `spool-path` 옵션에 설정된 디렉토리에 저장되며, WAL파일을 Postgres 운영 서버에 빠르게 전달하는데 도움을 주는 역할을 합니다.
+
+- `archive-header-check` + 
+** 기본값 :  y + 
+** archive시 WAL 파일의 헤더에서 PostgreSQL 서버의 버전/id를 체크합니다. + 
+** archive된 WAL 파일이 Stanza생성 시점의 PostgreSQL 버전과 System identifier와 일치 하는지 체크하여, 다른 Stanza로 WAL 파일이 잘못 보내지는 것을 방지합니다.
+** 추가적으로, pg_controldata(14버전 기준)의 DATA directory 위치를 참조하여 해당 DATA directory에서 복사된 WAL 파일인지 체크 합니다.
+
+- `archive-push-queue-max` + 
+** 기본값 : 없음 + 
+** 설정 가능 범위 : 0(byte) - 4PiB + 
+** archive-push 큐의 최대 사이즈를 지정합니다.
+** archive-async 옵션이 활성화 될 경우 사용 되는 옵션입니다.
+** 최대 사이즈에 도달할 경우 아래와 같은 현상들이 발생합니다.
+*** Postgres 운영 서버로 부터 WAL 파일이 성공적으로 archive 되었다고 알림을 준 다음, WAL 파일을 삭제합니다.
+*** Postgres 운영 서의 log에 WARNING 로그를 남깁니다.
+*** 위의 현상들이 발생할 경우 백업 일관성이 지켜지지 않아, PITR을 제대로 수행할 수 없게 될 수 있습니다.
+*** 비동기 모드에서는 WAL 파일이 가득 차는 것을 방지하기 위해 전체 큐의 내용이 삭제됩니다.
+** 이 옵션의 목적은 볼륨이 가득차서 PostgreSQL 서버가 멈추는 것을 방지하는 것입니다. 백업을 잃는 것이 서버가 중단 되는 것 보다는 나은 선택이기 때문입니다.
+
+- `archive-timeout` + 
+** 기본값 : 60 + 
+** 설정 가능 범위 : 0.1 - 86400 (초) + 
+** WAL 파일이 pgBackrest의 저장소에 도달 하는 것을 대기하는 최대 시간을 지정합니다.
+
+==== Backup Options
+
+- `archive-check` + 
+** 기본값 : y + 
+** 백업이 완료되기 전에, WAL 세그먼트를 확인합니다. + 
+** 현재 WAL archive에 있는 WAL 세그먼트를 모두 확인해서 백업의 일관성을 유지할 수 있는지 확인하는 작업입니다.
+** pgBackrest가 아닌 다른 방법으로 archive를 하지 않는 이상, 이 옵션은 기본 값으로 사용하는 것을 권장합니다.
+** archive-copy 옵션을 사용하기 위해서는 반드시 y로 설정해야 합니다.
+
+- `archive-copy` + 
+** 기본값 : n + 
+** 백업의 일관성 유지를 위해 필요한 WAL 세그먼트를 추가 복사합니다. + 
+** 기본적으로 WAL 파일과 백업은 다른 디렉토리에 저장되나, 이 옵션을 y로 설정하게 되면 모든 WAL파일을 저장함과 동시에 추가로 해당 백업의 일관성에 필요한 WAL 파일을 백업 디렉토리 안에 복사하는 것입니다.
+** 추가적인 공간을 사용하기 때문에 사용에 주의를 요합니다.
+** 이 옵션을 사용할 경우, WAL 파일을 압축하여 보관 하는 것을 추천합니다.
+*** WAL 파일 압축 시 Restore 과정에서 보다 많은 리소스가 사용될 수 있으므로 주의 하시기 바랍니다.
+
+- `archive-mode-check` + 
+** 기본값 : y + 
+** Postgres 운영 서버의 archive_mode 설정 상태를 체크합니다.
+** 이 옵션을 사용 시 archive_mode를 always로 사용할 수 없습니다.
+** 운영 서버가 Primary-standby 다중 노드로 구성되어 있을 경우, Primary와 Standby의 WAL 세그먼트 내용은 동일하나, 다른 checksum값을 가지고 있습니다.
+*** 다중 node로 부터 WAL 파일을 저장할 경우, 복구시에 checksum 값을 확인하는 과정에서 충돌 및 오류가 발생할 수 있습니다.
+*** 따라서, 충돌을 방지하기 위해 하나의 노드를 기준으로 WAL 세그먼트를 저장할 수 있도록 archive_mode를 확인하는 옵션입니다.
+
+- `backup-standby` + 
+** 기본값 : n + 
+** Postgres 운영 서버의 primary node가 아닌 standby node로 부터 backup을 받아옵니다.
+** primary와 standby host 모두 설정이 되어있어야 합니다.
+
+- `checksum-page` + 
+** 기본값 : Postgres 운영 서버의 설정 값 + 
+** data page checksum 유효성을 검사 합니다.
+** pgBackrest는 클러스터를 백업 하는 동안 모든 data page checksum의 유효성을 검사 합니다.
+** 이 옵션은 Postgres 운영 서버의 data page checksum 설정이 켜져있을 경우 자동으로 켜지게 됩니다.
+*** data page checksum은 initdb시에 설정되며, 기본 값은 0(off) 입니다.
+*** SHOW data_checksums를 이용하여 시스템 카탈로그를 조회 하거나 pg_controldata를 이용하여 확인할 수 있습니다.
+** checksum 유효성 검증에 실패하더라도 백업이 중단되지 않으나 경고 문구가 로그에 남게됩니다.
+*** invalid page에 대한 정보는 backup manifest에 남게됩니다.
+
+- `exclude` + 
+** 기본값 : 없음 + 
+** 백업 시에 특정 파일 또는 path를 제외합니다.
+** 제외된 파일의 목록은 log 파일에 info 레벨로 기록됩니다.
+** 주의 사항
+*** 모든 path 및 filename은 $PGDATA를 기준으로 상대적인 path 입니다.
+*** exclude=junk/ 입력 시 $PGDATA/junk/ 디렉토리 및 디렉토리 내의 모든 파일이 제외됩니다.
+*** exclude=junk 입력 시 $PGDATA 내의 모든 디렉토리 안에 들어있는 junk 이름을 가진 파일과 junk 이름을 가진 디렉토리 모두 제외됩니다.
+
+- `expire-auto` + 
+** 기본값 : y + 
+** 백업이 끝난 뒤에 자동으로 expire 커맨드를 실행합니다.
+*** 백업 정책을 기준으로 만료된 파일을 모두 제거해주는 커맨드 입니다.
+** 이 옵션을 비활성화 할 경우, 수동으로 expire 커맨드를 실행하여 백업 정책을 유지하여야 합니다.
+** 그렇지 않을 경우, 볼륨 용량 관리에 문제가 생길 수 있습니다.
+
+- `manifest-save-threshold` + 
+** 기본값 : 1GiB + 
+** 설정 가능 범위 : 1(byte) - 1TiB
+** 백업을 진행하는 동안 Manifest를 저장하는 주기(용량)을 설정합니다.
+** manifest 파일은 data checksum 값을 보관하며, 백업이 중단 되었을 때 재시작 지점을 확인하는 용도로도 사용됩니다.
+** 백업 대상 사이즈의 1% 또는 이 옵션의 값 중 더 큰 값으로 설정 및 동작합니다.
+
+- `resume` + 
+** 기본값 : y + 
+** 실패한 백업의 재시작을 허용합니다.
+** 백업에 실패한 지점부터 다시 백업을 시작하기 때문에, 처음 부터 백업을 진행하는 것 보다 시간을 단축할 수 있습니다.
+** 이 기능이 필요하지 않은 경우 n으로 설정하는 것이 성능상 도움을 줍니다.
+
+- `start-fast` + 
+** 기본값 : n + 
+** 백업을 시작하기 전에 강제로 CEHCKPOINT를 수행합니다.
+** pg_start_backup()에 fast 파라미터를 사용하는 것 과 같아서, 활성화 시 백업이 즉시 시작됩니다.
+
+- `stop-auto` + 
+** 기본값 : n + 
+** 새 백업을 시작할 때, 이전에 실패한 백업이 있다면 자동으로 중지시킵니다.
+** 실패한 백업의 process가 실제로 중지하였음을 확인 시켜주기 위해, exclusive advisory lock이 가능한 경우에만 동작합니다.
+** 이 기능은 pg_is_in_backup() 함수를 호출하여 사용하기 때문에, PostgreSQL 9.3 버전 이상에서만 사용 가능합니다.
+** PostgreSQL 9.6 버전 부터는 백업 모드가 non-exclusive mode로 변경 되었기 때문에, 지원되지 않는 옵션입니다.
+
+==== General
+- `buffer-size` + 
+** 기본값 : 1 MiB + 
+** 설정 가능 범위 : 16 KiB, 32 KiB, 64 KiB, 128 KiB, 256 KiB, 512 KiB, 1 MiB, 2 MiB, 4 MiB, 8 MiB, 16 MiB
+** I/O 버퍼의 사이즈를 설정합니다.
+** 복사, 압축, 암호화 등의 명령에 사용되며, 사용 하는 버퍼의 갯수는 명령마다 다르고 특정 명령은 추가적으로 메모리를 사용할 수 있습니다.
+
+- `cmd` + 
+** 기본값 : 없음 + 
+** 내용 추가 예정
+
+- `cmd-ssh` + 
+** 기본값 : ssh + 
+** SSH 연결 시 운영체제 PATH 디렉토리에 있는 ssh가 아닌 다른 SSH 클라이언트를 사용하고 싶을 경우 지정하는 옵션입니다.
+
+- `compress-level` + 
+** 기본값 : compress-type에 따라 다름 + 
+** 설정 가능 범위 : 0 ~ 9
+** 파일 압축 레벨을 설정합니다.
+** compress-type이 none이 아닐 경우(압축을 할 경우) 사용됩니다.
+** 숫자가 높을 수록 더 높은 압축률을 가집니다.
+** compress-type별 압축 레벨은 아래와 같습니다.
+*** bz2 - 9
+*** gz - 6
+*** lz4 - 1
+*** zst - 3
+
+- `compress-level-network` + 
+** 기본값 : 3 + 
+** 설정 가능 범위 : 0 ~ 9
+** 네트워크 압축 레벨을 설정합니다.
+** compress-type이 none이면서 pgBackrest와 Postgres 운영 서버가 분리되어 있는 경우에만 동작합니다.
+** 네트워크 트래픽을 줄여주며, 레벨을 0으로 설정할 경우 압축을 하지 않습니다.
+** compress-type이 none이 아닐 경우 파일을 압축하는 compress-level만 적용됩니다.
+** SSH 압축은 항상 비활성화 됩니다.
+
+- `compress-type` + 
+** 기본값 : gz + 
+** 설정 가능 값 : 
+*** none : 압축을 하지 않습니다.
+*** bz2 : bzip2 포맷으로 압축합니다.
+*** gz : gzip 포맷으로 압축합니다.
+*** lz4 : lz4 포맷으로 압축합니다. (운영체제가 지원해야 합니다.)
+*** zst : zstandard 포맷으로 압축합니다. (운영체제가 지원해야 합니다.)
+** 파일 압축 타입을 정하는 옵션입니다.
+
+- `config` + 
+** 기본값 : CFGOPTDEF_CONFIG_PATH "/" PROJECT_CONFIG_FILE + 
+** default 위치가 아닌 다른 위치의 config 파일을 우선 순위로 적용할 수 있습니다.
+
+- `config-include-path` + 
+** 기본값 : CFGOPTDEF_CONFIG_PATH "/" PROJECT_CONFIG_INCLUDE_PATH + 
+** default 위치가 아닌 다른 위치의 config 파일들을 추가로 적용할 수 있습니다.
+** config 파일은 .conf 확장자의 경우에만 인식이 가능합니다.
+
+- `config-path` + 
+** 기본값 : CFGOPTDEF_CONFIG_PATH + 
+** default 위치가 아닌 다른 위치의 config 파일들을 우선 순위로 적용할 수 있습니다.
+** config 파일은 .conf 확장자의 경우에만 인식이 가능합니다.
+
+- `db-timeout` + 
+** 기본값 : 1800
+** 설정 가능 범위 : 0.1 ~ 604800 (초)
+** pg_start_backup, pg_stop_backup 등 과 같은 데이터베이스 쿼리의 시간 제한을 설정합니다.
+
+- `delta` + 
+** 기본값 : n
+** 백업 또는 복원시에 checksum 값을 사용하는 옵션입니다.
+** 이 옵션을 사용 시 pgBackrest는 백업 시에 이 파일이 이미 백업이 된 파일인지 확인할 때 타임스탬프가 아닌, checksum 값을 기준으로 판단하게 됩니다.
+
+- `dry-run` + 
+** 기본값 : n
+** 백업 시에 모의 테스트를 진행합니다.
+
+- `io-timeout` + 
+** 기본값 : 60 초
+** 설정 가능 범위 : 0.1 ~ 3600 (초)
+** 커넥션과 읽기 쓰기 명령에 대해 시간 제한을 설정합니다.
+
+- `lock-path` + 
+** 기본값 : /tmp/pgbackrest
+** lock 파일이 저장될 위치를 설정합니다.
+** lock 파일은 pgBackrest의 여러 명령 실행되는 것을 막기 위한 장치 입니다.
+
+- `neutral-umask` + 
+** 기본값 : y
+** neutral-umask를 사용합니다. 생성되는 디렉토리와 파일의 권한을 0000으로 설정합니다.
+** 사용 하지 않을 시 디렉토리는 0750 파일은 0640 권한으로 생성됩니다.
+
+- `process-max` + 
+** 기본값 : 1
+** 설정 가능 범위 : 1 ~ 999
+** 압축 및 전송에 멀티 프로세스를 사용합니다.
+** 압축 및 전송 속도는 빨라질 수 있으나 데이터베이스 서버에 무리가 갈 수있으므로 사용전에 충분한 리소스 확인이 필요합니다.
+
+
+- `protocol-timeout` + 
+** 기본값 : 1830
+** 설정 가능 범위 : 0.1 ~ 604800 (초)
+** 로컬 또는 원격 프로세스가 프로토콜 계층에서 새 메시지를 수신할 때까지 대기하는 시간 제한을 초 단위로 설정합니다.
+** 설정하게 될 경우 프로세스가 새 메시지를 수신할 때 까지 무기한 대기하는 현상을 방지할 수 있습니다.
+
+
+- `protocol-timeout` + 
+** 기본값 : 1830
+** 설정 가능 범위 : 0.1 ~ 604800 (초)
+** 로컬 또는 원격 프로세스가 프로토콜 계층에서 새 메시지를 수신할 때까지 대기하는 시간 제한을 초 단위로 설정합니다.
+** 설정하게 될 경우 프로세스가 새 메시지를 수신할 때 까지 무기한 대기하는 현상을 방지할 수 있습니다.
+
+
+- `raw` + 
+** 기본값 : n
+** 데이터를 변환하지 않습니다.
+** 암호화, 압축, 압축 해제 등 모든 데이터 변경과 관련된 작업을 하지 않고 데이터를 원본으로 백업 및 복원 합니다.
+
+
+- `sck-keep-alive` + 
+** 기본값 : y
+** Keep-alive를 활성화 합니다.
+** socket conenction이 끊어지지 않도록 keep-alive message를 보냅니다.
+
+
+- `spool-path` + 
+** 기본값 : /var/spool/pgbackrest
+** 비동기식 WAL archiving의 수행 결과에 대한 임시 파일을 저장하는 PATH 입니다.
+** 비동기식 WAL archiving 수행 시, 이 PATH에 임시 파일을 작성하게 되고, Foreground 프로세스가 파일의 작성 여부를 보고 PostgreSQL 서버에 빠르게 성공 여부를 전달할 수 있습니다.
+** 파일의 용량은 성공 했을 시 0, 실패 했을 시 100~999 byte 입니다.
+** PATH는 CIFS나 NFS가 아닌 LOCAL Filesystem으로 지정되어야 합니다.
+
+- `stanza` + 
+** stanza를 정의합니다.
+** stanza는 PostgreSQL 데이터베이스에 대한 설정 입니다. 서버가 어느 위치에 있고, 어떻게 백업 할지, WAL archiving은 어떻게 할지 등의 다양한 설정이 저장되는 옵션입니다.
+** 하나의 DB 서버에 하나의 Stanza가 정의되어야 합니다.
+** stanza명은 primary와 standby 모두 사용되므로, 이름 지정시에 클러스터의 실제 기능을 설명하는 이름으로 지정하는 것이 좋습니다.
+
+
+- `tcp-keep-alive-count` + 
+** 기본값 : 없음
+** 설정 가능 범위 : 1 ~ 32
+** TCP 연결이 완전히 끊어졌다고 인지할 keep-alive 메시지 전송 횟수를 지정합니다.
+** 지정한 횟수 만큼 keep-alive message 전송에 실패하게 되면, 연결이 끊어졌다고 인지하게 됩니다.
+** TC_KEPPCNT 소켓 옵션이 지원되는 시스템에서만 사용 가능합니다.
+
+
+- `tcp-keep-alive-idle` + 
+** 기본값 : 없음
+** 설정 가능 범위 : 1 ~ 3600 (초)
+** keep alive 메시지 전송 성공 시 다음에 발송할 메시지 간의 간격을 설정합니다.
+** TCP_KEPPIDLE 소켓 옵션이 지원되는 시스템에서만 사용 가능합니다.
+
+
+- `tcp-kepp-alive-interval` + 
+** 기본값 : 없음
+** 설정 가능 범위 : 1 ~ 900 (초)
+** keep-alive 메시지 전송 실패 시 메시지를 다시 발송할 때 까지의 간격을 지정합니다.
+** TCP_KEPP_INTVL 소켓 옵션이 지원되는 시스템에서만 사용 가능합니다.
+
+==== Log Options
+Trace log-level은 key나 password 같은 민감한 정보를 노출시킬 수 있으므로 사용에 주의하시기 바랍니다.
+
+- `log-level-console` + 
+** 기본값 : warn
+** 설정 가능 범위 :
+*** off - 어떤 경우에도 log를 작성하지 않습니다.
+*** error - error에 대해서만 로그를 작성합니다.
+*** warn - warning과 error에 대해서만 로그를 작성합니다.
+*** info - info, warning, error에 대해서만 로그를 작성합니다.
+*** detail - detail, info, warning, error에 대해서만 로그를 작성합니다.
+*** debug - debug, detail, info, warning, error에 대해서만 로그를 작성합니다.
+*** trace - trace(debug보다 많은 정보를 포함), debug, info, warning, error 모두에 대해서 로그를 작성합니다.
+** 콘솔 log 작성의 레벨을 설정합니다.
+
+- `log-level-file` + 
+** 기본값 : info
+** 설정 가능 범위 :
+*** off - 어떤 경우에도 log를 작성하지 않습니다.
+*** error - error에 대해서만 로그를 작성합니다.
+*** warn - warning과 error에 대해서만 로그를 작성합니다.
+*** info - info, warning, error에 대해서만 로그를 작성합니다.
+*** detail - detail, info, warning, error에 대해서만 로그를 작성합니다.
+*** debug - debug, detail, info, warning, error에 대해서만 로그를 작성합니다.
+*** trace - trace(debug보다 많은 정보를 포함), debug, info, warning, error 모두에 대해서 로그를 작성합니다.
+** log 파일의 작성 레벨을 설정합니다.
+
+
+- `log-level-stderr` + 
+** 기본값 : warn
+** 설정 가능 범위 :
+*** off - 어떤 경우에도 log를 작성하지 않습니다.
+*** error - error에 대해서만 로그를 작성합니다.
+*** warn - warning과 error에 대해서만 로그를 작성합니다.
+*** info - info, warning, error에 대해서만 로그를 작성합니다.
+*** detail - detail, info, warning, error에 대해서만 로그를 작성합니다.
+*** debug - debug, detail, info, warning, error에 대해서만 로그를 작성합니다.
+*** trace - trace(debug보다 많은 정보를 포함), debug, info, warning, error 모두에 대해서 로그를 작성합니다.
+** stderr와 stdout으로 출력되는 로그의 레벨을 설정합니다.
+** stderr는 타임스탬프와 프로세스를 출력하지 않습니다.
+
+- `log-path` + 
+** 기본값 : /var/log/pgbackrest
+** 로그 파일이 저장될 PATH를 지정합니다.
+** log-level-file이 off일 경우 지정하지 않아도 됩니다.
+
+- `log-subprocess` + 
+** 기본값 : n
+** 로그를 subprocess
+** pgbackrest의 작업으로 인해서 생성되는 하위 프로세스들에 대해서도 로그 작성을 활성화 할지에 대한 여부를 지정합니다.
+
+- `log-timestamp` + 
+** 기본값 : y
+** 로그 작성시에 timestamp를 같이 작성할지에 대한 여부를 지정합니다.
+
+==== Repository options
+
+- `repo` + 
+** 기본값 : 없음
+** 설정 가능 범위 : 1 ~ 256
+** 저장소를 설정 합니다.
+** 저장소를 여러 개 구성 할 시,pgBackrest가 각각의 저장소를 인식할 수 있는 번호를 설정하는 옵션입니다.
+
+- `repo-azure-account` + 
+** 기본값 : 없음
+** Azure 클라우드 스토리지를 사용할 경우, 계정 정보를 입력합니다.
+** Ex) repo1-azure-account=pg-backup
+
+- `repo-azure-container` + 
+** 기본값 : 없음
+** Azure 클라우드 스토리지의 Container명을 입력하는 옵션입니다.
+** 해당 Container에 repo-path 옵션으로 설정된 PATH가 저장소의 PATH로 설정되게 됩니다.
+
+- `repo-azure-endpoint` + 
+** 기본값 : blob.core.windows.net
+** Azure 클라우드 스토리지의 Endpoint를 입력하는 옵션입니다.
+** Blob 서비스에 연결하는데 사용되며, Azure Government를 사용하지 않는 한 기본 값을 그대로 사용하면 됩니다.
+
+- `repo-azure-key` + 
+** 기본값 : 없음
+** Azure 클라우드 스토리지를 사용할 경우, 인증에 필요한 shared Key 또는 access signature 를 입력합니다.
+** Key의 종류에 따라서 repo-azure-key-type 옵션에 지정해주어야 합니다.
+
+
+- `repo-azure-key-type` + 
+** 기본값 : shared
+** 설정 가능 범위 :
+*** shared : Shared Key
+*** sas : Shared access signature
+** Azure 클라우드 스토리지 인증시에 사용되는 key의 타입을 지정하는 옵션입니다.
+
+*클라우드 스토리지 내용 추가 예정*
+
+==== Restore
+
+- `archive-mode` + 
+** 기본값 : preserve
+** 설정 가능 범위 :
+*** off : archive를 하지 않도록 설정합니다.
+*** preserve : 현재 아카이브 셋팅을 유지합니다.
+** 클러스터 복원 시에 archive setting을 지정할 수 있습니다.
+
+- `db-exclude` + 
+** 기본값 : 없음
+** 클러스터 복원 시에 특정 데이터베이스를 제외하고 복원할 수 있습니다.
+
+- `db-include` + 
+** 기본값 : 없음
+** 클러스터 복원 시에 특정 데이터베이스만 지정하여 복원할 수 있습니다.
+
+- `link-all` + 
+** 기본값 : n
+** 백업 당시에 클러스터 데이터 디렉토리에 설정되어 있던 심볼릭 링크들을 모두 복원합니다.
+** 옵션이 n일 경우, 모든 심볼릭링크 데이터가 $PGDATA 디렉토리 안으로 복원됩니다.
+
+- `link-map` + 
+** 기본값 : 없음
+** 심볼릭 링크의 대상을 수정할 수 있습니다.
+** Ex) link-map=pg_xlog=/data/xlog
+
+- `recovery-option` + 
+** 기본값 : 없음
+** recovery.conf의 옵션을 변경할 수 있습니다.
+** PostgreSQL 12버전 부터 postgresql.conf로 통합되었습니다.
+
+- `tablespace-map` + 
+** 기본값 : 없음
+** 지정된 디렉토리에 테이블스페이스를 복원합니다.
+** 테이블 스페이스를 $PGDATA로 이동하는 것은 문제가 발생할 수 있어 권장되지 않습니다.
+** Ex) tablespace-map=ts_01=/data/tablespace
+
+- `tablespace-map-all` + 
+** 기본값 : 없음
+** 모든 테이블스페이스를 지정한 디렉토리에 복원합니다.
+** Ex) tablespace-map-all=/data/tablespace
+
+== 5. Command
+
+=== 5.1 Command 개요
+
+=== 5.2 Command List
+
+==== Backup
+`pgbackrest --stanza=pgserver --type=full backup` + 
+
+==== Restore
+`pgbackrest --stanza=pgserver --target-timeline=latest restore` + 
+ + 
+
+*PITR* + 
+`pgbackrest --stanza=pgserver --delta --type=time "--target=2022-05-18 20:40:00.000000+00" --target-action=promote restore --link-all`
+
+== 6. 테스트
+

@@ -1,0 +1,44 @@
+= ora2pg.conf
+
+* *ora2pg.conf 파일은 아래와 같은 Section 으로 나누어져있고 Section마다 지시어가 포함되어 있습니다.*
+
+* *아래 표엔 주요 지시어만 포함하고 있습니다.*
+
+|===
+|Section|지시어|DEFAULT VALUE|설명
+.6+|INPUT 
+|ORACLE_HOME|$ORACLE_HOME|ORACLE_HOME의 경로를 입력
+|ORACLE_DSN|dbi:Oracle:host=[SERVER_IP];sid=[SID_NAME];port=[PORT]|DBI DSN 형식으로 소스 DB 이름을 설정
+|ORACLE_USER|ORACLE_USER|소스 DB의 USER 설정 (Superuser 권장)
+|ORACLE_PWD|ORACLE_PWD|소스 DB의 USER PASSWORD 설정
+|USER_GRANTS|1|1 설정 시 단순 USER / 0 설정시 SUPER USER
+|DEBUG|0|1 설정 시 수행 로그를 자세히 출력
+.2+|SCHEMA
+|EXPORT_SCHEMA|0|1 설정 시 Oracle 스키마 이름과 동일하게 EXPORT 하여 PostgreSQL에 IMPORT 시 동일한 이름의 SCHEMA 를 생성
+|SCHEMA|빈 값|Oracle 스키마를 입력 시 ora2pg는 스키마 이름이 접두사로 붙은 이름의 모든 오브젝트를 EXPORT 함
+.4+|EXPORT
+|TYPE|TABLE|VIEW/TABLE/PROCEDURE/COPY ... 등등 많은 종류의 EXPORT 수행할 타입을 지정함 ( 자세한 내용은 메뉴얼 참고 )
+|DISABLE_COMMENT|0|1 설정 시 EXPORT 후 output.sql에 테이블이나 컬럼에 대한 COMMENT 주석이 남지 않음
+|ALLOW|TABLE_TEST|해당 설정으로 원하는 오브젝트 리스트를 EXPORT 가능함 (ex. ALLOW TABLE1,TABLE2 )
+|EXCLUDE|OTHER_TABLE|해당 설정으로 원하지 않는 오브젝트 리스트를 EXPORT 하지 않음
+.3+|OUTPUT
+|PG_DSN|dbi:Pg:dbname=test_db;
+host=localhost;port=5432|직접 데이터 이관이나 마이그레이션 테스트 기능 등을 사용할 때 적용 필요
+|PG_USER|test|직접 데이터 이관이나 마이그레이션 테스트 기능 등을 사용할 때 적용 필요
+|PG_PWD|test|직접 데이터 이관이나 마이그레이션 테스트 기능 등을 사용할 때 적용 필요
+.4+|PERFORMANCE
+|JOBS|1|해당 값은 사용할 프로세스 수 / COPY, FUNCTION 및 PROCEDURE Export TYPE에 다중 프로세스 지원을 추가
+제한은 컴퓨터의 코어 수
+|PARALLEL_TABLE|1|해당 값은 데이터 추출을 위해 병렬로 처리될 테이블 수를 정의하는 데 사용
+제한은 컴퓨터의 코어 수
+|ORACLE_COPIES|1|해당 값은 데이터를 추출할 때 Oracle에 대한 병렬 연결 수를 정의 제한은 컴퓨터의 코어 수
+DEFINED_PK에 정의된 열이 있는 경우에만 사용할 수 있음
+|DEFINED_PK|TABLE:COLUMN TABLE:ROUND(COLUMN)| 테이블의 PK가 정의 되어야 ORACLE_COPIES 활성화
+.2+|TRIGGERS AND SEQUENCES
+|DISABLE_SEQUENCE|0|1로 설정하면 COPY 또는 INSERT TYPE이 Export 되는 동안 모든 테이블에서 시퀀스 변경을 비활성화함
+데이터 마이그레이션 중 시퀀스 업데이트를 방지하기 위해 사용
+|DISABLE_TRIGGERS|0|COPY 또는 INSERT TYPE이 Export 되는 모든 테이블에서 트리거를 비활성화하는 데 사용됩니다.
+|
+|===
+
+

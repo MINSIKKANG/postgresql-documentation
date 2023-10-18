@@ -1,0 +1,252 @@
+= Bucardo
+:toc: 
+:toc-title: 목차
+:sectlinks:
+
+
+== 1. Bucardo 개요
+- 공식 사이트 : https://bucardo.org/Bucardo/
+- github 사이트 : https://github.com/bucardo/bucardo
+
+Bucardo는 PostgreSQL 서버들을 연결하는 Perl Daemon입니다. Bucardo가 필요한 데이터들을 기본적으로 'bucardo'라는 데이터베이스에 저장합니다. 해당 데이터는 Replication에 관련된 모든 데이터베이스들에 접근하는 방법, 복제할 테이블, 복제 방법을 포함합니다. +
+
+- bucardo 연결 순서
+1. 기본적으로 bucardo를 설치하면 두개의 데이터베이스를 bucardo 데이터베이스에 추가합니다. 
+2. 복제할 테이블에 대한 정보와 테이블 그룹을 추가합니다.
+3. 동기화를 합니다. 동기화는 한 서버에서 다른 서버 또는 서버 그룹으로 특정테이블을 복사하는 복제 방법입니다.
+
+
+- 동기화 과정
+1. 테이블이 변경되면 bucardo_delta 테이블에 기록합니다.
+2. 테이블이 변경되었음을 알리는 alarm이 bucardo Daemon으로 전송됩니다.
+3. Daemon은 해당 동기화를 컨트롤러에 알리고 수신 대기 상태로 돌아갑니다.
+4. 컨트롤러는 복제를 처리하기 위해 "kid"를 생성합니다.(또는 신호를 보냅니다?)
+5. "kid"는 새로운 transaction을 시작하고 table의 trigger와 rule을 비활성화 합니다.
+6. 그런 후에 변경된 행 목록을 수집하여 수행할 작업을 파악합니다.
+7. 충돌이 발생하면 표준 conflict_handler 또는 설정된 사용자의 conflict_handler가 동작하여 충돌 항목을 정렬합니다.
+8. trigger와 rule이 다시 활성화되고 transaction을 커밋합니다.
+9. transaction이 실패하면 사용자 exception handler들이 동작합니다.
+10. 작업이 완료되면 컨트롤러에 완료됬음을 알립니다.
+
+== 2. Bucardo 용어
+- db : 연결 정보가 있는 명명된 데이터베이스입니다.
+- dbgroup : 데이터베이스의 명명된 그룹입니다. 0개 이상의 데이터베이스를 포함할 수 있습니다.
+- table : 복제할 테이블입니다.
+- sequences : 복제할 시퀀스입니다.
+- relation : 복제 가능한 객체, 즉 테이블이나 시퀀스. "goat"로도 알려져 있습니다.
+- relgroup : relation의 그룹, "herd"라고도 합니다.
+- customname : original name을 새 name으로 매핑합니다. 예를 들어, 한 스키마에서 다른 이름으로 복제하거나 다른 테이블 이름으로 복제합니다.
+- sync : 복제할 대상(예: relgroup)에 대한 정보를 포함하는 복제 이벤트입니다. 또한 많은 다른 메타 정보가 포함되어 있습니다. 이것은 복제의 기본 단위입니다.
+- customcol : 복제할 열을 재정의할 수 있습니다. 대신 `SELECT *` 소스 열 목록에 없는 항목을 추가하는 것을 포함하여 여기에 원하는 것을 연결할 수 있습니다!
+- customcode : 동기화 프로세스의 특정 지점에서 실행할 수 있는 Perl 서브루틴입니다. 예외를 처리하거나 충돌을 처리하거나 기능에 대한 기대 없이 특정 시간에 실행할 수 있습니다(예: 트리거를 삭제하기 전).
+- ping : 일반적으로 동기화의 테이블에 대한 변경 사항이 즉시 NOTIFY를 실행하는지 여부를 나타내는 동기화 수준 속성을 의미합니다. 테이블이 매우 바쁜 경우(이 경우 일반적으로 X초마다 활동에 대한 동기화 확인을 수행하는 것이 더 좋음) 또는 동기화가 매우 특정한 시간에만 실행되어야 하는 경우에는 이것이 바람직하지 않습니다.
+- MCP : "Master Control Program"이 메인 프로그램입니다. 요청을 수신하고 컨트롤러(CTL)를 분기하여 처리합니다. 또한 VAC(진공) 프로세스를 분기할 수 있습니다. 다른 직접 동기화는 자체적으로 작동하지 않습니다. 외부 세계와의 커뮤니케이션을 담당합니다. 시작 시 bucardo 데이터베이스를 읽습니다.
+- CTL : "컨트롤러"는 단일 동기화(복제 세트라는 이름의 하나) 실행을 담당합니다. 실제 작업을 수행할 한 명 이상의 어린이(KID)를 만듭니다. 아이들을 보호하고 MCP에 다시 보고하는 일을 담당합니다. 수명이 짧거나 영구적일 수 있습니다(구성 가능).
+- KID : 실제 작업을 담당하는 CTL에 의해 분기된 자식 프로그램입니다. 일반적으로 "동기화 X를 위해 A에서 B로 복제"와 같은 특정 명령으로 생성됩니다. 생성한 CTL과만 통신합니다. 또한 작업을 수행한 후 종료할지 또는 컨트롤러에서 다른 작업을 기다리는 데 매달려 있는지에 대해 구성할 수 있습니다.
+- VAC : 주로 bucardo_delta_* 테이블을 트리밍한 상태로 유지하는 책임이 있는 내부 진공 프로세스입니다. Bucardo 4에서 필요했던 cron 작업을 대체합니다.
+- Bucardo.pm: Bucardo 코드가 포함된 기본 Perl 파일입니다. `bucardo` 명령줄 도구 에 의해 호출됩니다 .
+
+== 3. Bucardo 설치
+- git 설치
+----
+git clone https://github.com/bucardo/bucardo /opt/bucardo
+----
+
+- 추가 라이브러리 설치
+----
+yum install -y perl-CPAN perl-DBI perl-DBD-Pg
+yum install -y perl-Sys-Syslog
+
+#DBIx-Safe 설치
+rpm -ivh https://download-ib01.fedoraproject.org/pub/epel/7/aarch64/Packages/p/perl-DBIx-Safe-1.2.5-25.el7.noarch.rpm
+----
+- 해당 postgresql에 맞는 plperl 버전을 잘 확인하여 설치해야 합니다. +
+----
+yum install postgresql11-plperl
+----
+* libdb 버전이 높을 시 다운그레이드 해줍니다. +
+----
+yum downgrade libdb libdb-utils
+----
+- bucardo 설치
+
+    cd /opt/bucardo
+    perl Makefile.PL
+    make
+    make install
+
+== 4. PostgreSQL 및 Bucardo 설정
+
+=== 4.1 user, database 생성
+[source, shell]
+----
+psql -c "CREATE USER bucardo SUPERUSER PASSWORD 'bucardo';"
+psql -c "CREATE DATABASE bucardo_db;"
+psql -c "GRANT ALL ON DATABASE bucardo_db TO bucardo"
+psql -c "ALTER USER postgres PASSWORD 'postgres'"
+----
+
+=== 4.2 .pgpass 파일 생성
+bucardo로 PostgreSQL 연결 시 user를 password 없이 접속하기 위함입니다. +
+.pgpass 파일은 반드시 권한을 600으로 주어야 합니다.
+
+----
+cat << EOF > ~/.pgpass
+172.27.0.192:5432:*:postgres:postgres
+172.27.0.192:5432:*:bucardo:bucardo
+
+172.27.0.162:5432:*:postgres:postgres
+172.27.0.162:5432:*:bucardo:bucardo
+EOF
+
+chown postgres:postgres ~/.pgpass
+chmod 600 ~/.pgpass
+----
+=== 4.3 bucardo Schema 설치
+Bucardo의 스키마를 설치하기 위해서는 PostgreSQL 버전이 8.1 이상이어야 합니다. +
+아래 예시는 localhost에 있는 PostgreSQL에 bucardo Schema를 설치하는 것입니다. +
+실제로 Schema는 다른 서버나 DB에 있어도 상관없으며, Bucardo Util, Daemon도 독립적으로 존재할 수 있습니다.(해당 사항은 정확한 테스트 및 조사가 필요)
+[source, shell]
+----
+-bash-4.2$ bucardo -h localhost install
+This will install the bucardo database into an existing Postgres cluster.
+Postgres must have been compiled with Perl support,
+and you must connect as a superuser
+
+Current connection settings:
+1. Host:           localhost
+2. Port:           5432
+3. User:           bucardo
+4. Database:       bucardo
+5. PID directory:  /var/run/bucardo
+Enter a number to change it, P to proceed, or Q to quit: p
+
+Attempting to create and populate the bucardo database and schema
+Database creation is complete
+
+Updated configuration setting "piddir"
+Installation is now complete.
+If you see errors or need help, please email bucardo-general@bucardo.org
+
+You may want to check over the configuration variables next, by running:
+bucardo show all
+Change any setting by using: bucardo set foo=bar
+----
+
+=== 4.4 btest(test) 데이터베이스 create (양쪽 PostgreSQL)
+복제할 데이터베이스를 생성합니다.
+[source, shell]
+----
+psql -h 172.27.0.192 -U bucardo template1 -c "drop database if exists btest;"
+psql -h 172.27.0.192 -U bucardo template1 -c "create database btest owner bucardo;"
+
+psql -h 172.27.0.162 -U bucardo template1 -c "drop database if exists btest;"
+psql -h 172.27.0.162 -U bucardo template1 -c "create database btest owner bucardo;"
+----
+
+기존에 사용하고 있는 Database를 사용하려면 pg_dump를 이용하여 원격 PostgreSQL 서버에 schema를 복제합니다.
+[source, shell]
+----
+pg_dump -U bucardo --schema-only -h 172.27.0.192 btest | psql -U bucardo -h 172.27.0.162 btest
+----
+
+=== 4.5 동기화할 DB 등록
+[source, shell]
+----
+bucardo -h 172.27.0.192 -U bucardo add db main1 db=btest user=bucardo pass=bucardo host=172.27.0.192
+bucardo -h 172.27.0.192 -U bucardo add db main2 db=btest user=bucardo pass=bucardo host=172.27.0.162
+----
+
+- Bucardo 연결 확인
+[source, shell]
+----
+bucardo -h 172.27.0.192 -U bucardo list dbs
+----
+- 연결 확인 조회
+[source, shell]
+----
+Database: main1  Status: active  Conn: psql -U bucardo -d btest -h 172.27.0.192
+Database: main2  Status: active  Conn: psql -U bucardo -d btest -h 172.27.0.162
+----
+
+=== 4.6 동기화할 테이블 등록(relgroup)
+[source, shell]
+----
+bucardo -h 172.27.0.192 -U bucardo add all tables db=main1 relgroup=btest_relgroup
+----
+- 만약 해당 테이블을 등록할 때 Primary key(기본키)가 없으면 테이블 등록에 실패할 수 있습니다. +
+-----
+Failed to add sync: DBD::Pg::st execute failed: ERROR:  Table "public.pgbench_history" must specify a primary key! at line 119. at line 30.
+CONTEXT:  PL/Perl function "validate_sync" at /usr/local/bin/bucardo line 4671.
+-----
+
+해당 오류를 수정하기 위해서는 table을 bucardo에서 삭제해야 합니다.
+----
+bucardo delete table pgbench_history;
+----
+
+
+=== 4.6 bucardo dbgroup 생성
+복제방법(Master-Slave, Master-Master)에 따라 dbgroup을 설정하는 것이 다릅니다. +
+
+- Master-Slave 복제
+----
+bucardo -h 172.27.0.192 -U bucardo add dbgroup btest_dbgroup main1:source main2:target
+----
+- Master-Master 복제
+----
+bucardo -h 172.27.0.192 -U bucardo add dbgroup btest_dbgroup main1:source main2:source
+----
+
+=== 4.7 bucardo Sync 생성
+<sync 생성 시 옵션 추가 필요>
+----
+bucardo -h 172.27.0.192 -U bucardo add sync btest_sync dbgroup=btest_dbgroup relgroup=btest_relgroup conflict_strategy=bucardo_source onetimecopy=2 autokick=0
+----
+
+- sync 업데이트
+[source, shell]
+----
+bucardo -h 172.27.0.192 -U bucardo update sync btest_sync autokick=1
+bucardo -h 172.27.0.192 -U bucardo update sync btest_sync conflict_strategy=bucardo_latest_all_tables
+----
+
+- sync 조회
+[source, shell]
+----
+bucardo list sync
+----
+
+
+== 5. Bucardo 실행
+- sudo 권한 user에 부여 +
+root에서 작업이 필요합니다.
+<확인 필요>
+----
+chmod +w /etc/sudoers
+vi /etc/sudoers 
+postgres  ALL=(ALL)  ALL
+chmod -w /etc/sudoers
+----
+
+- bucardo start +
+
+----
+sudo bucardo -h 172.27.0.192 -U bucardo start
+----
+
+시작 시 bucardo binary가 sudo로 실행이 되지 않을 수 있습니다. /usr/local/bin/bucardo 경로의 binary를 /usr/bin으로 복사하면 정상적으로 동작합니다.
+
+----
+cp /usr/local/bin/bucardo /usr/bin/.
+sudo bucardo -h 172.27.0.192 -U bucardo start
+----
+
+== 6. Bucardo 삭제
+<삭제 시나리오 추가>
+
+== 7. Bucardo 테스트
+<테스트 시나리오 추가>
+
+== bucardo 명령어 옵션
+<추후 사용법 정리>

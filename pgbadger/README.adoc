@@ -1,0 +1,431 @@
+= pgbadger
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+
+== pgbadger 개요
+
+- github 사이트 : https://github.com/darold/pgbadger
+- pgbadger 사이트 : https://pgbadger.darold.net/
+
+pgBadger는 javascript 라이브러리(flotr2)를 사용하여 그래프를 그리는 Standalone Perl 프로그램입니다. 그래서 추가적인 모듈이나 패키지를 설치할 필요가 없습니다. 그리고 pgBadger는 Bootstrap javascript 라이브러리와 FontAwesome 웹폰트를 내장하고 있습니다.
+
+pgBadger는 PostgreSQL 로그 파일 형식(syslog, stderr, csvlog, sonlog)와 pgbouner 로그 파일을 감지할 수 있습니다. 또한 대용량 로그 파일과 gzip 압축 파일을 분석하도록 설계되어 있습니다.
+
+모든 차트는 확대/축소 가능하며 PNG 이미지로 저장할 수 있습니다.
+
+또한 -j(-J) 옵션을 이용하여 core수를 조정하여 단일 로그 또는 여러 파일에 대한 병렬처리가 가능합니다.
+
+그리고 incremental report를 구성할 수 있습니다. pgBadger는 매일, 매시간 실행하여 일별 및 주별 누적 report를 출력할 수 있습니다.
+
+git에서 공식적으로 지원하는 sample도 있습니다.
+- pgbouncer와 같이 분석된 sample : https://pgbadger.darold.net/examples/sample.html
+- incremental mode로 분석한 report : https://pgbadger.darold.net/examples/report/index.html
+- error 및 events에 대한 report : https://pgbadger.darold.net/examples/errors.html
+
+== pgbadger 특징
+- PostgreSQL에서 남기는 log를 이용하여 분석합니다. 그래서 분석할 범위는 PostgreSQL 서버에서 parameter를 조정해야 합니다.
+- PostgreSQL의 log를 기준으로 분석할 때 다음과 같은 log 형식을 지원합니다. syslog, syslog2, stderr, jsonlog, csv, pgbouncer, logplex, rds, redshift.
+- pgBouncer와 같이 분석이 가능합니다.
+- Incremental Mode가 존재하는데 이 것은 주기적으로 cron을 이용하여 누적하여 report를 만들 수 있으며 일간 report, 주간 report를 만들 수 있습니다.
+- pgbadger는 원격에 있는 log 파일을 기준으로도 report가 생성이 가능합니다.
+- report는 대부분 그래프를 지원하여 수치로 볼 수 있습니다.
+
+== pgbadger 설치
+
+=== git에서 clone
+-----
+git clone https://github.com/darold/pgbadger.git
+-----
+
+특정한 버전의 source code는 git에서 제공하는 releases 를 참조합니다.
+https://github.com/darold/pgbadger/releases
+
+=== perl 패키지 설치
+-----
+yum install perl-CPAN
+-----
+
+=== perl Build
+[source,bash]
+-----
+cd pgbadger
+perl Makefile.PL
+-----
+
+* 결과
+[source,]
+-----
+Checking if your kit is complete...
+Looks good
+Writing Makefile for pgBadger
+-----
+
+=== perl로 설치
+-----
+chmod 755 pgbadger
+#root 권한으로
+make & make install
+-----
+
+
+== pgbadger 사용
+
+=== SYNOPSIS
+`Usage: pgbadger [options] logfile [...]`
+
+- logfile +
+logfile은 한개의 파일이 될 수도 있고, file의 리스트가 될 수도 있으며, file의 리스트를 반환하는 shell command가 될 수도 있습니다. 만약 stdin으로 부터 입력되는 log를 건너뛰고 싶다면 logfile 이름을 `-` 으로 정의하면 됩니다. 
+
+- options +
+-----
+-a | --average minutes : 쿼리 및 connection의 평균 그래프를 빌드할 시간(분)을 지정합니다.     
+                         기본적으로는 5분으로 설정됩니다.
+-A | --histo-average min: 쿼리의 histogram 그래프를 빌드할 시간(분)을 지정합니다.
+                          기본적으로는 60분으로 설정됩니다.
+-b | --begin datetime  : 로그의 시작되는 날짜/시간을 지정합니다.
+                         (time또는 timestamp와 동일합니다.)
+-c | --dbclient host   : report를 출력할 Client Host의 이름을 지정합니다.
+-C | --nocomment       : 쿼리들의 /* ... */ 와 같은 comment들을 삭제합니다.
+-d | --dbname database : report를 출력할 Database 이름을 지정합니다.
+-D | --dns-resolv      : Client IP Address를 지정한 DNS로 치환합니다.
+                         이것은 pgBadger가 느려지게 할 수 있습니다.
+-e | --end datetime    : 로그가 끝나는 날짜/시간을 지정합니다.
+                         (time또는 timestamp와 동일합니다.)
+-E | --explode         : Database별로 report를 만들려고 할때 사용합니다.
+                         Database와 관련이 없는 Global information은 postgres Database에
+                         추가됩니다.
+-f | --format logtype  : 분석할 log type을 지정합니다. 가능한 값 : syslog, syslog2, stderr, jsonlog,
+                         csv, pgbouncer, logplex, rds and redshift. pgbadger가
+                         log형식을 찾지 못할 때 사용합니다.
+-G | --nograph         : HTML 형식의 그래프를 비활성화 합니다. 기본적으로는 활성화되어 있습니다.
+-h | --help            : 옵션을 출력합니다.
+-H | --html-outdir path: incremental mode로 쓰여질 HTML report의 directory PATH,
+                         binaryfile은 -O, --outdir 옵션으로 설정된 곳으로 쓰여집니다.
+-i | --ident name      : syslog의 ident로 사용되는 프로그램 이름. 기본값은 postgres입니다.
+-I | --incremental     : incrmental mode를 사용합니다. report는 여러 일에 걸쳐
+                         생성됩니다. 분산적으로 directory를 처리할 수 있습니다.(--outdir)
+-j | --jobs number     : 동시에 파일에 접근할 job의 수를 지정합니다. 코어수와 동일합니다.
+                         기본값은 한 파일에 job하나이며, or when working with
+                         csvlog format.
+-J | --Jobs number     : 병렬로 처리할 로그 파일의 개수를 지정합니다. 기본값은 한 파일에
+                         프로세스 하나입니다.
+-l | --last-parsed file: 분석된 마지막 날짜 및 행을 기준으로 생성된 incremental log의 분석 구문을 
+                         file로 남깁니다. 마지막 동작에서 난 에러를 찾거나, log의 주기가 주(week)단위 일때 하루마다(per day) 하나의 report를 사용하고 싶을 때 유용합니다.
+-L | --logfile-list file:logfile의 리스트를 가지고 있는 file을 지정합니다.
+-m | --maxlength size  : 쿼리의 최대 길이, 지정하면 주어진 크기로 지정됩니다.
+                         기본적으로 100000 사이즈에서 절삭됩니다.
+-M | --no-multiline    : garbage 데이터를 피하기 위하여 multiline statements를 수집하지 않습니다.
+                         특히 커다란 report에서 생성된 error.
+-N | --appname name    : report를 출력할 Application 이름을 지정합니다.
+-o | --outfile filename: output 파일의 이름을 지정합니다. 기본적으로 다음과 같은 형식을
+                         기본적으로 가집니다.: out.html, out.txt, out.bin,
+                         out.json or out.tsung. 이 옵션은 여러 format을 여러 번에 걸쳐 
+                         사용 가능합니다. json output을 사용하고 싶다면 JSON::XS Perl 모듈을
+                         설치하여야 가능합니다. 만약 stdout으로 출력하고 싶다면 파일이름을 - 로 
+                         지정합니다.
+-O | --outdir path     : out file들이 저장되는 directory를 지정합니다.
+-p | --prefix string   : postgresql.conf에서 정의한 log_line_prefix의 값을 지정합니다.
+                         기본적으로 제공되는 prefix를 사용하지 않은 경우에 사용합니다.
+                         예를 들어 client ip, applicatioin name에 대하여 정의한 경우입니다.
+-P | --no-prettify     : SQL 쿼리를 prettify한 형식으로 바꾸는 것을 비활성화합니다.
+-q | --quiet           : stdout으로 아무것도 출력하지 않습니다. progressbar 포함.
+-Q | --query-numbering : --dump-all-queries 또는 --nomalized-only 옵션을 사용한 output에
+                         쿼리들에게 넘버링을 추가합니다.
+-r | --remote-host ip  : 원격의 host에 있는 log file을 분석할 수 있습니다.
+-R | --retention N     : incremental mode를 유지할 주(week)의 수를 지정합니다.
+                         기본값은 0(비활성화)입니다. N만큼 output directory에 보관할 때 사용합니다. 
+                         이전 주(week), 날(day)는 directory에서 자동으로 삭제합니다.
+-s | --sample number   : 저장할 sample 쿼리의 수를 지정합니다. 기본값은 3입니다.
+-S | --select-only     : SELECT Query들만 report에 출력합니다.
+-t | --top number      : 저장/display할 쿼리들의 수를 지정합니다. 기본값은 20입니다.
+-T | --title string    : HTML report 상단에 표시될 title을 변경합니다.
+-u | --dbuser username : report를 출력할 Database user의 이름을 지정합니다.
+-U | --exclude-user username : 특정 user name을 기준으로 report에 출력하지 않습니다.
+                         이 옵션은 여러 번 사용할 수 있습니다.
+-v | --verbose         : verbose 또는 debug mode를 활성화합니다. 기본적으로 비활성화되어 있습니다.
+-V | --version         : pgBadger의 버전을 명시하고 종료됩니다.
+-w | --watch-mode      : ?logwatch가 할 수 있는 것과 같은 error들만 report에 출력합니다. 
+                        only report errors just like logwatch could do.
+-W | --wide-char       : Perl 메시지 "Wide character in print" 출력을 피하기 위해
+                        쿼리의 html 출력을 UTF8로 인코딩합니다.
+-x | --extension       : output의 형식. 값: text, html, bin, json or
+                         tsung. 기본값은 html입니다.
+-X | --extra-files     : incremental mode에서 pgBadger는 output directory에 CSS와 JS 파일을
+                         따로 생성합니다.
+-z | --zcat exec_path  : zcat program의 full path를 설정합니다.
+                         만약 zcat, bzcat, unzip이 path에 없을 때 사용합니다.
+-Z | --timezone +/-XX  : GMT timezone의 시간을 설정합니다.
+                         Javascript 그래프에서 날짜/시간을 조정하려면 이것을 사용합니다.
+                         integer 값이라면 예를 들어 2, float값이라면 2.5 와 같이 사용합니다.
+--pie-limit num        : pie data lower than num% will show a sum instead.
+--exclude-query regex  : regex와 매칭되는 쿼리들은 report에서 제외시킵니다.
+                         예: "^(VACUUM|COMMIT)" 다음 옵션은 여러번 사용할 수 있습니다.
+--exclude-file filename: filename과 매칭되는 쿼리들은 report에서 제외시킵니다.
+                         하나의 regex는 한 행마다 적용됩니다.
+--include-query regex  : regex 조건에 맞지 않는 쿼리들은 report에서 제외됩니다.
+                         조건을 여러개를 동시에 사용할 수 있습니다. 예 : "(tbl1|tbl2)".
+--include-file filename: regex 조건에 맞는 쿼리들은 file의 path를 포함합니다. 
+--disable-error        : error report를 생성하지 않습니다.
+--disable-hourly       : 시(hourly) 단위 report를 생성하지 않습니다.
+--disable-type         : queries by type, queries by database, queries by user에 대한 
+                         쿼리들에 대한 report를 생성하지 않습니다.
+--disable-query        : 쿼리에 대한 report를 생성하지 않습니다. (slowest, most
+                         frequent, queries by users, by database, ...).
+--disable-session      : session에 대한 report를 생성하지 않습니다.
+--disable-connection   : connection에 관한 report를 생성하지 않습니다.
+--disable-lock         : lock에 대한 report를 생성하지 않습니다.
+--disable-temporary    : temporary에 대한 report를 생성하지 않습니다.
+--disable-checkpoint   : checkpoint/restartpoint에 대한 report를 생성하지 않습니다.
+--disable-autovacuum   : autovacuum에 대한 report를 생성하지 않습니다.
+--charset              : HTML에 사용되는 Character set을 설정합니다.
+                         기본값은 UTF-8입니다.
+--csv-separator        : CSV filed 구분자를 지정합니다. 기본값은 , 입니다.
+--exclude-time  regex  : regex 을 포함하는 timestamp를 제외합니다. 예: "2013-04-12 .*"
+                         다음 옵션은 여러 번 사용할 수 있습니다.
+--include-time  regex  : regex 을 포함하는 timestamp만 report에 출력합니다. 예: "2013-04-12 .*"
+                         다음 옵션은 여러 번 사용할 수 있습니다.
+--exclude-db name      : 특정 database name을 기준으로 report에 출력하지 않습니다.
+                         예: "pg_dump". 이 옵션은 여러 번 사용할 수 있습니다.
+--exclude-appname name : 특정 appname을 기준으로 report에 출력하지 않습니다.
+                         예: "pg_dump". 이 옵션은 여러 번 사용할 수 있습니다.
+--exclude-line regex   : regex 조건에 맞는 log line을 제외합니다. 
+                         이 옵션은 여러 번 사용할 수 있습니다.
+--exclude-client name  : 특정 Client IP를 기준으로 report에 출력하지 않습니다.
+                         이 옵션은 여러 번 사용할 수 있습니다.
+--anonymize            : 쿼리의 모든 리터럴을 모호하게 하여 기밀 데이터를 숨기는 데 유용합니다.
+--noreport             : incremental mode에서는 report를 생성하지 않습니다.
+--log-duration         : pgBadger는 log_duration=on, log_statement=all 에 의해 생성된
+                         로그 항목에 대하여 연결하도록 강제합니다.
+--enable-checksum      : 각 쿼리 보고서 아래에 md5 합을 추가합니다.
+--journalctl command   : PostgreSQL logfile을 분석할 명령어를 교체하는 journalctl command로
+                         대신 사용할 수 있습니다. 보통은 journalctl -u postgresql-9.5 이러한 형태를 사용합니다.
+--pid-dir path         : pid file이 반드시 저장되어야 하는 path를 설정합니다.
+                         기본값은 /tmp 입니다.
+--pid-file file        : pgBadger를 동시에 실행시키기 위한 pid file의 이름을 지정합니다. 
+                         기본값은 pgbadger.pid 입니다.
+--rebuild              : used to rebuild all html reports in incremental
+                         output directories where there's binary data files.
+--pgbouncer-only       : HTML 헤더에 pgBouncer에 대한 메뉴만 보여줍니다.
+--start-monday         : incremental mode일때, 캘린더의 시작은 일요일입니다.
+                         이 옵션은 월요일로 시작할 수 있게 만들 수 있습니다.
+--iso-week-number      : incremental mode에서, 캘린더는 월요일부터 시작하며 ISO 8601의
+                         주수(week number)를 가집니다. 이것은 01~53의 범위의 값을 가지며
+                         첫번째 주(week)은 적어도 4일을 가지게 됩니다.
+--normalized-only      : 모든 정규화된 쿼리는 out.txt로 출력합니다.
+--log-timezone +/-XX   : GMT timezone의 시(hours)의 값을 정합니다. 이 옵션을 사용하게 되면
+                         log는 다른 date/time을 찾게 됩니다. 예를들어 이 값이 integer라면 2,
+                         float라면 2.5 로 표현할 수 있습니다.
+--prettify-json        : json의 형식을 prettified하게 출력합니다.
+--month-report YYYY-MM : 해당 월에 해당되는 누적 HTML report를 생성합니다.
+                         report 생성에 필요한 incremental(증분) output과 모든 바이너리 파일을
+                         필요하게 됩니다.
+--day-report YYYY-MM-DD: 해당 날짜에 해당되는 HTML report를 생성합니다.
+                         report 생성에 필요한 incremental(증분) output과 모든 바이너리 파일을
+                         필요하게 됩니다.
+--noexplain            : auto_explain으로 생성되는 line을 생성하는 처리를 하지 않습니다.
+--command CMD          : stdin을 통해 log를 검색할 때 실행되는 command를 정의합니다.
+                         pgBadger는 pipe로 해당 command를 열고 command로 생성된 log들을
+                         분석하게 됩니다.
+--no-week              : pgbadger에게 주간 report를 생성하지 않도록 지정합니다.
+                         너무 시간이 오래걸릴 때 유용합니다.
+--explain-url URL      : graphical explain tool의 url을 지정한 url로 바꿉니다.
+                         기본값은 http://explain.depesz.com/ 입니다.
+--tempdir DIR          : temporary file이 쓰이는 directory를 지정합니다.
+                         기본값은 File::Spec->tmpdir() || '/tmp' 입니다.
+--no-process-info      : pgbadger prcoess를 식별하기 위해 process의 title을 변경하지
+                         못하도록 합니다. 어떤 system은 이것을 사용할 수 없을 수 있습니다.
+--dump-all-queries     : log file에서 각각의 placeholders position에서 bind parameter를 
+                         대체하는 쿼리들을 전부 dump합니다.
+--keep-comments        : 정규화된 쿼리들의 commend를 삭제하지 않습니다. 같은 정규화 쿼리들을
+                         구별하기 위해 유용할 수 있습니다.
+--no-progressbar       : progressbar를 비활성화 합니다.
+-----
+위의 옵션에서 설명했듯 `-r` 또는 `--remote-host` 를 사용하면 원격의 host ip를 이용하여 원격의 log file을 분석할 수 있습니다. 아래는 ssh 옵션을 설정함으로써 암호없이 사용할 수 있습니다.
+-----
+--ssh-program ssh        ssh program의 위치를 설정합니다. 기본값은 ssh 입니다.
+--ssh-port port          ssh 연결할 port를 지정합니다. 기본값은 22입니다.
+--ssh-user username      login할 user의 이름을 지정합니다. 기본값은 현재 실행하는 user의 이름입니다.
+--ssh-identity file      사용할 ssh identity file의 위치를 지정합니다.
+--ssh-timeout second     ssh 연결할 때 timeout될 시간을 지정합니다. 기본값은 10초(sec)입니다.
+--ssh-option  options    ssh를 연결할 때의 옵션 -o 를 정의합니다.
+                         Options always used:
+                             -o ConnectTimeout=$ssh_timeout
+                             -o PreferredAuthentications=hostbased,publickey
+-----
+
+구문 분석할 로그 파일은 URI를 사용하여 지정할 수도 있으며 지원되는 프로토콜은 http[s] 및 [s]ftp입니다. curl 명령은 파일을 다운로드하는 데 사용되며 다운로드하는 동안 파일이 구문 분석됩니다. ssh 프로토콜도 지원되며 원격 호스트에서와 같이 ssh 명령을 사용합니다. 아래의 예를 참조하십시오.
+
+=== 사용 예시
+- 단일 file 분석
+-----
+pgbadger /var/log/postgresql.log
+-----
+- 여러 file 분석
+-----
+pgbadger /var/log/postgresql/postgresql-2012-05-*
+pgbadger /var/log/postgres.log.2.gz /var/log/postgres.log.1.gz /var/log/postgres.log
+-----
+
+- 특수한 query 구문 제외
+-----
+pgbadger --exclude-query="^(COPY|COMMIT)" /var/log/postgresql.log
+-----
+
+- log의 시작 날짜와 종료 날짜를 지정
+-----
+pgbadger -b "2012-06-25 10:56:11" -e "2012-06-25 10:59:11" /var/log/postgresql.log
+-----
+
+- stdout의 로그로 분석
+-----
+cat /var/log/postgres.log | pgbadger -
+-----
+
+- 특정 prefix를 가지는 로그 분석
+-----
+# Log line prefix with stderr log output
+pgbadger --prefix '%t [%p]: user=%u,db=%d,client=%h' /pglog/postgresql-2012-08-21*
+pgbadger --prefix '%m %u@%d %p %r %a : ' /pglog/postgresql.log
+# Log line prefix with syslog log output
+pgbadger --prefix 'user=%u,db=%d,client=%h,appname=%a' /pglog/postgresql-2012-08-21*
+-----
+
+- job을 이용하여 속도를 높여 분석
+-----
+# Use my 8 CPUs to parse my 10GB file faster, much faster
+pgbadger -j 8 /pglog/postgresql-10.1-main.log
+-----
+
+- pgbouncer로그와 함께 분석
+-----
+pgbadger /var/log/postgresql/postgresql-10.1-main.log ssh://username@172.12.110.14/pgbouncer.log
+-----
+
+- 특정 시간 분석 제외
+-----
+pgbadger --exclude-time "2013-09-.* (23|13):.*" postgresql.log
+-----
+
+- journalctl 명령어로 구문 분석 +
+journalctl 명령어는 PostgreSQL을 systemctl로 실행했을 때 가능합니다. +
+-----
+pgbadger --journalctl 'journalctl -u postgresql-9.5'
+-----
+
+- 원격의 호스트에서 command를 불러올 때 
+-----
+pgbadger -r 192.168.1.159 --journalctl 'journalctl -u postgresql-9.5'
+-----
+
+- incremental mode 매주 보고
+-----
+0 4 * * 1 /usr/bin/pgbadger -q `find /var/log/ -mtime -7 -name "postgresql.log*"` -o /var/reports/pg_errors-`date +\%F`.html -l /var/reports/pgbadger_incremental_file.dat
+-----
+
+- json log type을 인식하여 report 추출 +
+pgbadger가 json type을 인식하지만 강제로 인식시킬 때 다음과 같이 옵션을 사용합니다.
+-----
+pgbadger -f jsonlog -o cloudsql_out.html cloudsql.log
+-----
+
+== Log 설정
+- 참고 : [https://browndwarf.tistory.com/23](https://browndwarf.tistory.com/23)
+- **log_line_prefix** : 분석하려는 목표에 따라 prefix에 찍힐 인자들을 정리하고, 이 값과 pgBadgerOption을 동일하게 해야 한다. 주의해야할 사항 중 하나는 syslog를 사용할 경우에는 Process ID와Timestamp 정보가 자동으로 생성되지만, stderr을 사용할 경우에는 반드시 %t 와 %p option이설정되어야 한다.
+- **log_min_duration_time** : 전체 Query를 대상으로 성능 분석이 필요할 경우 이 값을 0으로 해서 전체 Query Log가 출력되게 하고, Query 실행 시간을 확인해야 한다.
+- **lc_messages** : 별다른 언어 지원이 없기 때문에 언어를 영어로 설정해야 한다. (그 외에는 'Notrecommended' 한다고 적혀있다.)
+- **log_checkpoint** : Check Point에 대한 통계 및 성능 분석이 필요할 때 'on'으로 설정한다.
+- **log_connections, log_disconnections** : DB 접속 주체에 대한 통계가 필요할 때 'on'으로설정한다.
+- **log_lock_waits** : DB Operation중 lock 통계가 필요할 때 'on'으로 설정한다
+- **log_temp_files** : temp file 통계를 작성하려 할 때 설정. 0으로 설정하면 전체 temp file에대한 Log가 생성된다
+- **log_autovacuum_min_duration** : Vaccuum Process 통계를 작성하려 할 때 설정. 0으로 설정하면전체 Vaccume Process에 대한 Log가 생성된다
+- **log_statement** : pgBadger가 log를 분석할 때, log_min_duration_time에 의해 write되는 log와 log_statement의 상태를 통해 write되는 log를 구분할 수 없습니다. 따라서 log_min_duration_time이 활성화되어 있다면 'none'으로 설정해야 한다. 
+
+log_statement 및 log에 대한 parameter의 자세한 설명은 link:https://github.com/hypersql/hypersql-postgresql-documentation/blob/main/docs/admin/Parameter/README.adoc#log-%EA%B8%B0%EB%A1%9D-%EB%82%B4%EC%9A%A9[Log 기록 내용]을 참고합니다.
+
+
+- pg 로그
+-----
+log_line_prefix = '%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '
+log_min_duration_statement = 1000
+
+log_checkpoints = on
+log_connections = on
+log_disconnections = on
+log_lock_waits = on
+log_temp_files = 0
+log_autovacuum_min_duration = 0
+log_error_verbosity = default
+log_statement = all
+-----
+
+- 로그 분석 예
+------
+pgbadger --prefix '%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h' -j 2 ./*.log
+------
+
+== Incremental mode
+pgBadger는 증분 모드(Incremental Mode)를 `-I` , `--incremental` 옵션으로 사용할 수 있습니다. 이 모드는 하루에 하나씩 보고서를 생성하며 매주 누적보고서를 생성합니다. output은 필수로 output Directory(`-O` or `--outdir`)으로 설정해야하며 기본적은 index.html로 생성됩니다.
+
+보통 cron으로 report를 증분하여 사용하기 때문에 `-q` 옵션(출력없이)을 사용합니다.
+그리고 `-X` 또는 `--extra-files` 옵션을 이용하여 명령어를 사용하면 Javascript와 CSS를 output Directory에 별개로 작성하여 디스크 공간을 절약할 수 있습니다.
+아래의 예는 매일 4시에 증분하는 형식으로 진행됩니다.
+------
+0 4 * * * root /usr/local/bin/pgbadger -I -q /hypersql/pg/14/log/pg_log/*.log -O /hypersql/pg/14/log/pgbadger_report/
+------
+
+이 모드에서는 output directory에 자동으로 중분 file을 생성하기 때문에 해당 파일의 경로를 변경하려는 경우가 아니면 -I 옵션을 사용할 필요는 없습니다.
+
+=== Incremental의 Directory 구조
+Incrmental mode를 사용하여 증분 report를 생성하게 되면 기본적으로 다음과 같은 구조를 가집니다.
+
+------
+./pgbadger_report
+| LAST_PARSED //마지막으로 분석했을 때의 로그 구문
+| index.html //최상단에서 날짜별로 조회할 수 있도록 보여주는 html
+|- ./{YEARS}
+    |- ./{MONTH}
+        |- ./{DAY}
+            | YYYY-MM-DD-??.bin //Incremental로 분석할 때의 binary
+            | index.html  //해당 날짜에 해당하는 report
+------
+
+
+=== Incremental report 재작성
+증분 report는 pgbadger report 수정 또는 모든 HTML report를 업데이트할 수 있도록 재작성 할 수 있습니다.
+-----
+rm /path/to/reports/*.js
+rm /path/to/reports/*.css
+pgbadger -X -I -O /path/to/reports/ --rebuild
+-----
+
+=== 월간 report
+Incremental mode에서는 일별 및 주간 report만 사용할 수 있습니다. 월별 누적 report를 사용하는 경우에는 별도로 빌드하여 report를 만들어야 합니다. 다음의 예는 2022년 8월 보고서를 작성하려는 예입니다.
+-----
+pgbadger --month-report 2022-08 /hypersql/pg/14/log/pg_log/*.log -O /hypersql/pg/14/log/pgbadger_report/
+-----
+
+보고서가 데이터베이스별 옵션( -E | --explode )으로 작성된 경우 pgbadger를 호출하여 월별 보고서를 작성할 때도 이 옵션을 사용해야 합니다.
+-----
+pgbadger -E -X --month-report 2919-08 /var/www/pg_reports/
+-----
+
+== Binary Format
+바이너리 형식으로 증분 및 누적 보고서를 생성할 수 있습니다. 아래의 예는 로그를 `2022-08-03-16940.bin`
+
+`pgbadger --last-parsed <마지막 상태를 저장할 파일> -o <추출할 바이너리 파일> <분석할 로그 파일(s)>`
+-----
+pgbadger --last-parsed .pgbadger_last_state_file -o 2022-08-03-16940.bin /hypersql/pg/14/log/pg_log/*.log
+-----
+
+다음과 같이 생성한 바이너리 파일로 HTML report를 생성할 수 있습니다.
+-----
+pgbadger 2022-08-03-16940.bin -o test.html
+-----
+
+또한 여러 binary파일을 이용하여 HTML report를 생성할 수 있습니다.
+-----
+pgbadger -o day1_report.html day1/*.bin
+-----

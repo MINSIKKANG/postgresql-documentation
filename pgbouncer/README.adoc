@@ -1,0 +1,437 @@
+= pgbouncer
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== pgbouncer 개요
+
+- 공식 사이트 : https://www.pgbouncer.org/
+
+pgbouncer는 PostgreSQL의 Connection pool과 DB와의 연결 생성 및 연결 재사용을 할 수 있습니다.
+
+== pgbouncer 설치
+=== dependency 패키지 설치
+- GNU Make 3.81+
+- Libevent 2.0+
+- pkg-config
+- OpenSSL 1.0.1+ for TLS support
+- (optional) c-ares as alternative to Libevent’s evdns
+- (optional) PAM libraries
+
+[source,bash]
+-----
+yum install libevent-devel.x86_64 openssl-devel.x86_64 
+-----
+
+=== yum 설치
+[source,bash]
+-----
+yum -y install pgbouncer
+-----
+
+=== 소스 설치
+==== 소스 다운로드 
+[source,bash]
+----
+wget https://www.pgbouncer.org/downloads/files/1.17.0/pgbouncer-1.17.0.tar.gz --no-check-certificate
+tar -xzf tar -xzf pgbouncer-1.17.0.tar.gz
+cd pgbouncer-1.17.0
+----
+
+==== 빌드 후 설치
+[source,bash]
+-----
+./configure --prefix=/usr/local
+make && make install
+-----
+
+=== 설치 및 버전 확인
+[source,bash]
+-----
+$ pgbouncer -V
+PgBouncer 1.17.0
+libevent 2.0.21-stable
+adns: evdns2
+tls: OpenSSL 1.0.2k-fips  26 Jan 2017
+-----
+
+== pgbouncer 설정
+
+=== pgbouncer 디렉토리 권한 설정 
+[source,bash]
+-----
+# source install
+mkdir -p  /etc/pgbouncer
+chown -R hypersql:hypersql /etc/pgbouncer
+
+# yum install 
+chown -R hypersql:hypersql /etc/pgbouncer
+-----
+
+=== ini 파일 생성
+ini 파일은 databases 섹션과 기본섹션 두개로 나뉩니다. 섹션은 `[` `]` 으로 표기되며 구분됩니다.
+
+[source,bash]
+-----
+#source install
+vi /etc/pgbouncer/pgbouncer.ini 
+
+# yum install 
+mv /etc/pgbouncer/pgbouncer.ini /etc/pgbouncer/pgbouncer.ini.copy 
+vi /etc/pgbouncer/pgbouncer.ini 
+-----
+
+- 예시
+ 
+-----
+[databases]
+postgres = host=127.0.0.1 port=5432 dbname=postgres
+pgbouncer_test = host=127.0.0.1 port=5432 dbname=pgbouncer_test
+
+[pgbouncer]
+listen_port = 6543
+listen_addr = *
+auth_type = trust
+auth_file = auth.txt
+logfile = pgbouncer.log
+pidfile = pgbouncer.pid
+admin_users = postgres
+unix_socket_dir = /var/run/hypersql
+-----
+==== [databases] 섹션 설정
+* 다음과 같이 연결할 dbname을 쓴 후 connection에 필요한 정보들을 기입합니다. 
+* 해당 정보들은 key=value 형태로 입력합니다. 
+* dbname으로 pgbouncer는 관리용으로 등록되어 있어서 사용이 불가합니다.
+
+-----
+dbname = connection string 
+-----
+
+* 만약 정확한 이름이 존재하지 않는 요청이 왔을 때는 "*"로 표기한 connection string으로 사용됩니다.
+-----
+* = host=foo
+-----
+
+아래는 key값에 대하여 설명합니다.
+
+- `dbname` : 대상 데이터 베이스 이름입니다. pgbouncer를 통해 접속할 때 기존의 postgresql의 database name이 아닌 설정된 dbname으로 접속하게 됩니다.
+* 기본값 : client 측 데이터베이스 이름과 동일
+
+- `host` : 연결할 hostname 또는 IP주소입니다.
+- `port` : 연결할 port이며, 기본값은 5432입니다.
+- `user` : 대상 데이터베이스에 대하여 모든 연결이 지정된 사용자로 수행됩니다.
+- `password` : 지정하지 않으면 auth_file 또는 auth_query가 사용됩니다.
+- `auth_user` : 인증된 사용자입니다.
+- `pool_size` : 데이터베이스의 최대 풀 크기를 지정합니다.
+- `min_pool_ize` : 데이터베이스의 최소 풀크기를 설정합니다.
+- `reserve_pool` : 데이터베이스에 대해 추가 connection을 설정합니다.
+- `connect_query` : 모든 클라이언트가 연결을 사용할 수 있도록 허용하기 전에 실행할 쿼리입니다.
+- `pool_mode` : 특정한 pool mode를 설정합니다.
+- `max_db_connections` : 해당 데이터베이스의 연결의 최대값을 설정합니다.
+- `client_encoding` : client_encoding을 설정합니다.
+- `datestyle` : datestyle을 설정합니다.
+- `timezone` : timezone을 설정합니다.
+
+==== [pgbouncer] 섹션 설정
+- `logfile`  +
+로그파일의 위치를 지정합니다. 데몬 구동일 경우에는 syslog도 설정해야 합니다.
+경로가 아니면 현재 위치에 파일을 만듭니다.
+* 기본값 : (없음)
+
+- `pidfile` +
+pid파일을 지정합니다. pid파일이 없으면 데몬 구동을 할 수 없습니다. + 
+경로가 아니면 현재 위치에 파일을 만듭니다.
+* 기본값 : (없음)
+
+- `listen_addr` +
+* 기본값 : (없음)
+
+- `listen_port` +
+* 기본값 : 6543
+
+- `unix_socket_dir` +
+Unix socket 위치를 지정합니다. 빈 문자열로 설정하면 Unix socket이 비활성화 됩니다. 
+* 기본값 : /tmp (Windows의 경우에는 없음)
+
+- `unix_socket_mode` +
+* 기본값 : 0777
+
+- `unix_socket_group` +
+* 기본값 : (없음)
+
+- `user` +
+해당 값이 설정된 경우 pgbouncer가 시작되면 변경할 user를 지정합니다. pgbouncer가 root나 설정된 user일 경우에만 작동합니다.
+* 기본값 : (없음)
+
+- `pool_mode` +
+다른 클라이언트가 서버 연결을 재사용할 수 있는 시기를 정합니다.
+* session : client가 연결이 끝나면 pool이 서버로 반환됩니다.
+* transaction : 트랜잭션이 끝나면 pool이 서버로 반환됩니다.
+* statement : query가 끝나면 pool이 서버로 반환됩니다. 그래서 여러 문에 걸친 transaction은 허용하지 않습니다.
+* 기본값 : session
+
+
+- `max_client_conn`
+* max_client_conn + (max pool_size * total databases * total users)
+
+
+- `default_pool_size` +
+유저/데이터베이스 쌍당 허용할 서버 연결 수 입니다. 데이터베이스별 구성에서 재정의 할 수 있습니다.
+* 기본값 : 20
+
+- `min_pool_size` +
+이 숫자 미만인 경우 풀에 서버 연결을 추가합니다. 전체 비활성 기간 후에 정상 부하가 갑자기 돌아올 때의 동작을 개선합니다.
+* 기본값 : 0 (비활성화)
+
+- `reserve_pool_size` +
+풀에 허용할 추가 연결 수 입니다.
+* 기본값 : 0 (비활성화)
+
+- `reserve_pool_timeout` +
+이 시간동안 클라이언트가 서비스가 되지 않은 경우 예약 풀에서 추가 연결을 사용합니다. 0은 비활성화입니다. [초]
+* 기본값 : 5.0
+
+- `max_db_connections` + 
+사용자에 관계없이 데이터베이스당 이 수 이상의 서버연결은 허용하지 않습니다. [databases]섹션에서 데이터베이스별로 설정할 수도 있습니다 .
+
+* 기본값 : 0 (무제한)
+
+- `max_user_connections` +
+데이터베이스에 관계없이 사용자당 이 수 이상의 서버 연결을 허용하지 않습니다.[users]섹션에서 사용자별로 설정할 수도 있습니다 .
+* 기본값 : 0 (무제한)
+
+- `server_round_robin` +
+기본적으로 PgBouncer는 LIFO(후입선출) 방식으로 서버 연결을 재사용하므로 가장 많은 부하를 받는 연결은 거의 없습니다. 이는 데이터베이스를 제공하는 단일 서버가 있는 경우 최상의 성능을 제공합니다. 
+* 기본값 : 0
+
+- `ignore_startup_parameters` +
+기본적으로 PgBouncer는 시작 패킷에서 추적할 수 있는 매개변수만 허용합니다 : client_encoding, datestyle, timezone and standard_conforming_strings.
+다른 매개변수를 허용하려면 여기에서 매개변수를 지정합니다.
+
+* 기본값 : 비어있음
+
+- `auth_type` +
+사용자를 인증하는 방법을 지정합니다.
+* cert : 클라이언트는 유효한 클라이언트 인증서를 사용하여 TLS 연결을 통해 연결해야 합니다.
+* md5 : MD5-based password check를 사용합니다. 이것이 기본 인증 방법입니다. `auth_file` 에 md5 암호와 일반 텍스트 암호를 모두 포함할 수 있습니다.
+* scram-sha-256 : password check with SCRAM-SHA-256를 사용합니다. `auth_file` 에 SCRAM secrets 또는 일반 텍스트 패스워드를 포함해야합니다.
+* trust : 인증을 사용하지 않습니다. `auth_file` 에 유저 이름이 꼭 존재해야합니다.
+* any : trust와 비슷하지만 유저 이름은 무시됩니다. 모든 데이터베이스가 특정 사용자로 로그인하도록 구성되어 있어야 합니다. 또한 콘솔 데이터베이스를 사용하면 모든 사용자가 admin으로 로그인할 수 있습니다.
+* pam : 유저를 인증하는데에 PAM을 사용하며 `auth_file` 은 무시됩니다.
+* hba : `auth_hba_file` 에서 로드하여 사용합니다.
+
+- `auth_hba_file` +
+`auth_type` 이 hba일때 사용하는 HBA 설정파일
+* 기본값 : 비어있음
+
+- `auth_file` + 
+사용자의 이름과 암호를 로드할 파일의 이름입니다. 
+
+[source,bash]
+-----
+	# auth_type = hba 일때
+	[pgbouncer]
+	auth_type = hba
+	auth_hba_file = /etc/pgbouncer/pg_hba.conf
+	auth_file = /etc/pgbouncer/auth.txt
+-----
+
+=== auth.txt 파일 생성
+pgbouncer에서 사용할 user의 DB user_name과 password를 입력하여 생성합니다.
+
+-----
+vi auth.txt
+"postgres" "postgres"
+-----
+
+== pgbouncer 실행
+
+=== pgbouncer 실행 옵션
+- `-d` or `--daemon`
+- `-R` or `--reboot` + 
+온라인 재시작을 수행합니다. 실행중인 pgbouncer process에 연결하여 unix socket을 로드한 다음 사용합니다. 만약 pgbouncer process가 없다면 정상적으로 부팅합니다. 다만, unix_socket_dir이 구성되고 OS에서 unix_socket을 지원하는 경우에만 동작합니다.
+
+- '-u' or `--user=user_name`
+- `-v` or `--verbose`
+- `-q` or `--quiet` +
+log에 stderr를 남기지 않는 것입니다. 다른 log에 대해서는 영향이 없습니ㅏㄷ.
+
+- `-V` or `--version` +
+버전을 표시합니다.
+
+- `-h` or `--help` +
+해당 명령어의 옵션을 설명합니다.
+
+- `--regservice` +
+Win32 : pgbouncer를 Window 서비스로 실행합니다. service_name 매개변수 값은 등록할 이름으로 사용됩니다.
+- `--unregservice` +
+Win32 : Windows 서비스 등록을 취소합니다.
+
+=== pgbouncer 실행
+[source,bash]
+-----
+pgbouncer -d pgbouncer.ini
+-----
+
+== pgbouncer 접속
+pgbouncer는 관리 콘솔을 위하여 미리 정해져있습니다.
+
+[source]
+-----
+psql -p 6543 -U postgres -d pgbouncer
+-----
+
+== pgbouncer 관리
+
+=== pgbouncer 콘솔 관리 기능
+-----
+pgbouncer=# show help;
+NOTICE:  Console usage
+DETAIL:  
+	SHOW HELP|CONFIG|DATABASES|POOLS|CLIENTS|SERVERS|USERS|VERSION
+	SHOW FDS|SOCKETS|ACTIVE_SOCKETS|LISTS|MEM
+	SHOW DNS_HOSTS|DNS_ZONES
+	SHOW STATS|STATS_TOTALS|STATS_AVERAGES|TOTALS
+	SET key = arg
+	RELOAD
+	PAUSE [<db>]
+	RESUME [<db>]
+	DISABLE <db>
+	ENABLE <db>
+	RECONNECT [<db>]
+	KILL <db>
+	SUSPEND
+	SHUTDOWN
+
+SHOW
+-----
+==== 버전 조회
+
+-----
+pgbouncer=# show version;
+     version
+------------------
+ PgBouncer 1.17.0
+(1 row)
+-----
+
+==== 서버 정보 조회
+
+-----
+pgbouncer=# show servers;
+-[ RECORD 1 ]-----+---------------
+type         | S
+user         | postgres
+database     | pgbouncer_test
+state        | active
+addr         | 127.0.0.1
+port         | 5432
+local_addr   | 127.0.0.1
+local_port   | 49148
+connect_time | 2022-08-22 03:42:59 PDT
+request_time | 2022-08-22 03:44:09 PDT
+wait         | 0
+wait_us      | 0
+close_needed | 0
+ptr          | 0x1f90660
+link         | 0x1f85070
+remote_pid   | 82973
+tls          |
+-[ RECORD 2 ]-----+---------------
+type         | S
+user         | postgres
+database     | pgbouncer_test
+state        | active
+addr         | 127.0.0.1
+port         | 5432
+local_addr   | 127.0.0.1
+local_port   | 49160
+connect_time | 2022-08-22 03:43:01 PDT
+request_time | 2022-08-22 03:44:09 PDT
+wait         | 0
+wait_us      | 0
+close_needed | 0
+ptr          | 0x1f913b0
+link         | 0x1f852a8
+remote_pid   | 82988
+tls          |
+
+      .....
+
+-----
+
+==== 서버 트랜잭션 정보 조회
+-----
+pgbouncer=# show stats;
+-[ RECORD 1 ]-----+---------------
+database          | pgbouncer
+total_xact_count  | 2
+total_query_count | 2
+total_received    | 0
+total_sent        | 0
+total_xact_time   | 0
+total_query_time  | 0
+total_wait_time   | 0
+avg_xact_count    | 0
+avg_query_count   | 0
+avg_recv          | 0
+avg_sent          | 0
+avg_xact_time     | 0
+avg_query_time    | 0
+avg_wait_time     | 0
+-[ RECORD 2 ]-----+---------------
+database          | pgbouncer_test
+total_xact_count  | 80909
+total_query_count | 566368
+total_received    | 51605085
+total_sent        | 15072576
+total_xact_time   | 578008981
+total_query_time  | 439801212
+total_wait_time   | 36939
+avg_xact_count    | 0
+avg_query_count   | 0
+avg_recv          | 0
+avg_sent          | 0
+avg_xact_time     | 0
+avg_query_time    | 0
+avg_wait_time     | 0
+-----
+
+==== config 설정 조회
+-----
+pgbouncer=# show config;
+-[ RECORD 1 ]------------------------------------------------------
+key        | admin_users
+value      | postgres
+default    |
+changeable | yes
+-[ RECORD 2 ]------------------------------------------------------
+key        | application_name_add_host
+value      | 0
+default    | 0
+changeable | yes
+-[ RECORD 3 ]------------------------------------------------------
+key        | auth_file
+value      | auth.txt
+default    |
+changeable | yes
+-[ RECORD 4 ]------------------------------------------------------
+key        | auth_hba_file
+value      |
+default    |
+changeable | yes
+-[ RECORD 5 ]------------------------------------------------------
+key        | auth_query
+value      | SELECT usename, passwd FROM pg_shadow WHERE usename=$1
+default    | SELECT usename, passwd FROM pg_shadow WHERE usename=$1
+changeable | yes
+
+                    .......
+-----
+
+=== pgbouncer.ini 파일 reload
+-----
+psql -p 6543 -U postgre -d postgres
+postgres=# reload;
+-----

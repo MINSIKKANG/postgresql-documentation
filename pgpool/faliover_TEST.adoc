@@ -1,0 +1,519 @@
+= pgpool failover test
+:toc: 
+:toc-title: 목차
+:sectlinks:
+:sectnums:
+
+== 시나리오
+
+- 환경
+    * Postgresql 11.14 버전
+    * pgpool 4.3.1 버전
+    * KT Cloud 환경
+    * Replication : Streaming Replication
+    * archive_mode : off
+    * 2 Node, 3 Node, pgpool 서버 분리 (2Node), pgpool 서버 분리 (3Node), pgpool + watchdog +
+    + Failback도 동시에 수행
+1. PostgreSQL Master Process kill, Cloud에서 인스턴스 내리기
+2. 네트워크 장애 (ifconfig eth1 down), 랜선 뽑기
+3. insert 반복수행(I/O Fencing)
+4. DISK 지우기
+5. pgpool down, pgpool detach_node
+6. vip failover(KT)
+7. session failover
+
+- postgresql.conf
+-----
+listen_addresses = '*'          # what IP address(es) to listen on;
+port = 5432                           # (change requires restart)
+wal_level = replica                 # minimal, archive, hot_standby, or logical
+wal_log_hints = on                      # also do full page writes of non-critical updates
+archive_mode = on               # enables archiving; off, on, or always
+max_wal_senders = 3             # max number of walsender processes
+wal_keep_segments = 64          # in logfile segments, 16MB each; 0 disables
+hot_standby = on                        # "on" allows queries during recovery
+logging_collector = on          # Enable capturing of stderr and csvlog
+-----
+
+- pg_hba.conf
+-----
+host    all             all             0.0.0.0/0               trust 
+host    replication     all             0.0.0.0/0               trust
+
+-----
+
+- recovery.conf
+-----
+standby_mode = on
+primary_conninfo = 'host=172.27.0.162 port=5432 user=postgres password=postgres application_name=''server1'''
+recovery_target_timeline = 'latest'
+trigger_file = '/tmp/trigger_file_0'                               
+-----
+
+- pgpool.conf
+-----
+# - pgpool Connection Settings -
+listen_addresses = '*'
+port = 9999
+socket_dir = '/var/run/postgresql'
+
+# - pgpool Communication Manager Connection Settings -
+pcp_listen_address = '*'
+pcp_port = 9898
+pcp_socket_dir = '/var/run/postgresql'
+
+backend_hostname1 = '172.27.0.162'
+backend_port1 = 5432
+backend_weight1 = 1
+backend_data_directory1 = '/var/lib/pgsql/11/data'
+backend_flag1 = 'ALLOW_TO_FAILOVER'
+backend_application_name1 = 'server0'
+
+backend_hostname1 = '172.27.0.192'
+backend_port1 = 5432
+backend_weight1 = 1
+backend_data_directory1 = '/var/lib/pgsql/11/data'
+backend_flag1 = 'ALLOW_TO_FAILOVER'
+backend_application_name1 = 'server1'
+
+##- HEALTH CHECK -##
+health_check_period0 = 10                  #health check 간격
+health_check_timeout0 = 20                 #시간내에 연결을 하지 못하면 connection fail
+health_check_user0 = 'postgres'            #PostgreSQL 사용자
+health_check_password0 = ''                #health_check_user에 구성된 사용자 패스워드, 비어있
+는 경>우 pool_passwd에 암호를 사용
+health_check_database0 = 'postgres'        #PostgreSQL 데이터베이스
+
+health_check_period1 = 10                  #health check 간격
+health_check_timeout1 = 20                 #시간내에 연결을 하지 못하면 connection fail
+health_check_user1 = 'postgres'            #PostgreSQL 사용자
+health_check_password1 = ''                #health_check_user에 구성된 사용자 패스워드, 비어>있는 경>우 pool_passwd에 암호를 사용
+health_check_database1 = 'postgres'        #PostgreSQL 데이터베이스
+
+
+sr_check_period = 10                       #replication을 확인하는 간격(s)
+sr_check_user = 'postgres'                 #replication check를 위한 PostgreSQL user
+sr_check_passowrd = ''                     #sr_check_user에 구성된 사용자 패스워드, 비어있는 >경우 pool_passwd에 암호를 사용
+sr_check_database = 'postgres'             #PostgreSQL 데이터베이스
+
+
+##- LOG -##
+logdir = '/var/lib/pgsql/11/pgpool_log'
+log_line_prefix = '%m: %a pid %p: '
+log_destination = 'stderr'
+logging_collector = on
+log_directory = '/var/lib/pgsql/11/pgpool_log'
+log_filename = 'pgpool-%Y-%m-%d_%H%M%S.log'
+
+##- FAILOVER & FAILBACK -##
+failover_command = '/etc/pgpool-II/failover.sh %d %h %p %D %m %M %H %P %r %R'
+follow_primary_command = '/etc/pgpool-II/follow_primary.sh %d %h %p %D %m %M %H %P %r %R'
+
+##- ONLINE RECOVERY -##
+recovery_user = 'postgres'
+recovery_password = ''
+-----
+
+- pool_passwd, pcp.conf 설정
+
+== PostgreSQL Master Process kill
+
+=== 2node failover
+
+[%header, width="100%", cols="1,9"]
+|===============
+|no| 시나리오
+|1 | pgbench로 30초 쿼리 수행
+|2 | process kill 또는 pg_ctl stop
+|3 | pgpool에서 node확인
+|4 | 기존 Standby 서버 확인
+|===============
+
+- pgbench 수행
+-----
+
+-----
+
+- process kill
+
+    ps -ef | grep postgres
+    kill -9 {Master_Process_PID}
+
+[source, shell]
+-----
+2022-04-20 09:40:31.542: health_check1 pid 32724: LOG:  failed to connect to PostgreSQL server on "172.27.0.151:5432", getsockopt() failed
+2022-04-20 09:40:31.542: health_check1 pid 32724: DETAIL:  Operation now in progress
+2022-04-20 09:40:31.542: health_check1 pid 32724: LOG:  health check failed on node 1 (timeout:0)
+2022-04-20 09:40:31.542: health_check1 pid 32724: LOG:  received degenerate backend request for node_id: 1 from pid [32724]
+2022-04-20 09:40:31.542: health_check1 pid 32724: LOG:  signal_user1_to_parent_with_reason(0)
+2022-04-20 09:40:31.542: main pid 32317: LOG:  Pgpool-II parent process received SIGUSR1
+2022-04-20 09:40:31.542: main pid 32317: LOG:  Pgpool-II parent process has received failover request
+2022-04-20 09:40:31.542: main pid 32317: LOG:  starting degeneration. shutdown host 172.27.0.151(5432)
+2022-04-20 09:40:31.546: main pid 32317: LOG:  Do not restart children because we are switching over node id 1 host: 172.27.0.151 port: 5432 and we are in streaming replication mode
+2022-04-20 09:40:31.546: main pid 32317: LOG:  execute command: /etc/pgpool-II/failover.sh 1 172.27.0.151 5432 /var/lib/pgsql/11/data 0 0 172.27.0.162 1 5432 /var/lib/pgsql/11/data
+Warning: Permanently added '172.27.0.162' (ECDSA) to the list of known hosts.^M
+waiting for server to promote.... done
+server promoted
+failover.sh: end: failover success; node1 -> node0; Wed Apr 20 09:40:34 KST 2022
+2022-04-20 09:40:34.025: main pid 32317: LOG:  find_primary_node_repeatedly: waiting for finding a primary node
+2022-04-20 09:40:34.029: main pid 32317: LOG:  find_primary_node: primary node is 0
+2022-04-20 09:40:34.029: main pid 32317: LOG:  starting follow degeneration. shutdown host 172.27.0.151(5432)
+2022-04-20 09:40:34.032: main pid 32317: LOG:  failover: 1 follow backends have been degenerated
+2022-04-20 09:40:34.033: main pid 32317: LOG:  failover: set new primary node: 0
+2022-04-20 09:40:34.033: main pid 32317: LOG:  failover: set new main node: 0
+failover done. shutdown host 172.27.0.151(5432)2022-04-20 09:40:34.033: main pid 32317: LOG:  failover done. shutdown host 172.27.0.151(5432)
+-----
+
+- pg_ctl stop
+
+    pg_ctl stop
+
+[source, shell]
+-----
+2022-04-19 17:50:55.539: health_check0 pid 32355: LOG:  health check failed on node 0 (timeout:0)
+2022-04-19 17:50:55.539: health_check0 pid 32355: LOG:  received degenerate backend request for node_id: 0 from pid [32355]
+2022-04-19 17:50:55.539: health_check0 pid 32355: LOG:  signal_user1_to_parent_with_reason(0)
+2022-04-19 17:50:55.539: main pid 32317: LOG:  Pgpool-II parent process received SIGUSR1
+2022-04-19 17:50:55.539: main pid 32317: LOG:  Pgpool-II parent process has received failover request
+2022-04-19 17:50:55.539: main pid 32317: LOG:  starting degeneration. shutdown host 172.27.0.162(5432)
+2022-04-19 17:50:55.542: main pid 32317: LOG:  Restart all children
+2022-04-19 17:50:55.542: main pid 32317: LOG:  execute command: /etc/pgpool-II/failover.sh 0 172.27.0.162 5432 /var/lib/pgsql/11/data 1 0 172.27.0.151 0 5432 /var/lib/pgsql/11/data
+Warning: Permanently added '172.27.0.151' (ECDSA) to the list of known hosts.
+waiting for server to promote.... done
+server promoted
+2022-04-19 17:50:57.856: sr_check_worker pid 32727: ERROR:  Failed to check replication time lag
+2022-04-19 17:50:57.856: sr_check_worker pid 32727: DETAIL:  No persistent db connection for the node 0
+2022-04-19 17:50:57.856: sr_check_worker pid 32727: HINT:  check sr_check_user and sr_check_password
+2022-04-19 17:50:57.856: sr_check_worker pid 32727: CONTEXT:  while checking replication time lag
+failover.sh: end: failover success; node0 -> node1; Tue Apr 19 17:50:58 KST 2022
+2022-04-19 17:50:58.016: main pid 32317: LOG:  find_primary_node_repeatedly: waiting for finding a primary node
+2022-04-19 17:50:58.020: main pid 32317: LOG:  find_primary_node: primary node is 1
+2022-04-19 17:50:58.020: main pid 32317: LOG:  starting follow degeneration. shutdown host 172.27.0.162(5432)
+2022-04-19 17:50:58.023: main pid 32317: LOG:  failover: 1 follow backends have been degenerated
+2022-04-19 17:50:58.024: main pid 32317: LOG:  failover: set new primary node: 1
+2022-04-19 17:50:58.024: main pid 32317: LOG:  failover: set new main node: 1
+-----
+
+- pgpool에서 node 확인
+
+-----
+[postgres@PG-Cent76-8C16G:data]$ pcp_node_info
+Password: 
+172.27.0.162 5432 3 0.500000 down down standby unknown 0 none none 2022-04-20 10:13:43
+172.27.0.151 5432 2 0.500000 up up primary primary 0 none none 2022-04-20 10:13:43
+-----
+
+
+- 기존 Standby 확인
+
+-----
+[postgres@PG-Cent76-4C8G-Rep3:log]$ psql -c "select pg_is_in_recovery();"
+ pg_is_in_recovery 
+-------------------
+ f
+(1 row)
+-----
+
+
+=== 2node failback (online recovery)
+
+    pcp_recovery_node -n 1
+
+[source, shell]
+-----
+2022-04-20 09:48:10.864 KST [22362] STATEMENT:  SELECT pgpool_recovery('basebackup.sh', '172.27.0.151', '/var/lib/pgsql/11/data', '5432', 1, '5432', '172.27.0.162')
+Warning: Permanently added '172.27.0.151' (ECDSA) to the list of known hosts.^M
+recovery_1st_stage: end: recovery_1st_stage is completed successfully
++ DEST_NODE_HOST=172.27.0.151
++ DEST_NODE_PGDATA=/var/lib/pgsql/11/data
++ PGHOME=/usr/pgsql-11
++ echo pgpool_remote_start: start: remote start Standby node 172.27.0.151
+pgpool_remote_start: start: remote start Standby node 172.27.0.151
++ ssh -T -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null postgres@172.27.0.151 -i /var/lib/pgsql/.ssh/id_rsa ls /tmp
+Warning: Permanently added '172.27.0.151' (ECDSA) to the list of known hosts.^M
++ '[' 0 -ne 0 ']'
++ ssh -T -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null postgres@172.27.0.151 -i /var/lib/pgsql/.ssh/id_rsa '
+    /usr/pgsql-11/bin/pg_ctl -l /dev/null -w -D /var/lib/pgsql/11/data status
+
+    if [ $? -eq 0 ]; then
+        exit 0
+    fi
+
+    /usr/pgsql-11/bin/pg_ctl -l /dev/null -w -D /var/lib/pgsql/11/data start
+'
+Warning: Permanently added '172.27.0.151' (ECDSA) to the list of known hosts.^M
+pg_ctl: no server running
+waiting for server to start.... done
+server started
++ '[' 0 -ne 0 ']'
++ echo pgpool_remote_start: end: PostgreSQL on 172.27.0.151 is started successfully.
+pgpool_remote_start: end: PostgreSQL on 172.27.0.151 is started successfully.
+-----
+
+=== 3node failover
+
+=== 3node failback
+
+== 네트워크 장애 (ifconfig eth1 down), 랜선 뽑기
+
+-----
+ifcfg eth0:1 {추가할 IP}
+-----
+[%header, width="100%", cols="1,9"]
+|===============
+|no| 시나리오
+|1 | pgbench로 30초 쿼리 수행
+|2 | network 연결 끊기
+|3 | pgpool에서 node확인
+|4 | 기존 Standby 서버 확인
+|===============
+
+=== 2node failover
+
+- pgbench 쿼리
+
+-----
+pgbench -S -S -c 20 -j 4 -t 20000
+-----
+
+- 네트워크 절단
+
+-----
+ifconfig eth0:1 down
+-----
+
+- failover
+
+-----
+2022-04-20 17:24:58.579: sr_check_worker pid 13658: LOG:  failed to connect to PostgreSQL server on "172.27.1.10:5432", timed out
+2022-04-20 17:25:07.196: health_check1 pid 12986: LOG:  failed to connect to PostgreSQL server on "172.27.1.10:5432", timed out
+2022-04-20 17:25:07.197: health_check1 pid 12986: LOG:  health check failed on node 1 (timeout:0)
+2022-04-20 17:25:07.197: health_check1 pid 12986: LOG:  received degenerate backend request for node_id: 1 from pid [12986]
+2022-04-20 17:25:07.197: health_check1 pid 12986: LOG:  signal_user1_to_parent_with_reason(0)
+2022-04-20 17:25:07.197: main pid 12535: LOG:  Pgpool-II parent process received SIGUSR1
+2022-04-20 17:25:07.197: main pid 12535: LOG:  Pgpool-II parent process has received failover request
+2022-04-20 17:25:07.197: main pid 12535: LOG:  starting degeneration. shutdown host 172.27.1.10(5432)
+2022-04-20 17:25:07.201: main pid 12535: LOG:  Do not restart children because we are switching over node id 1 host: 172.27.1.10 port: 5432 and we are in streaming replication mode
+2022-04-20 17:25:07.201: main pid 12535: LOG:  execute command: /etc/pgpool-II/failover.sh 1 172.27.1.10 5432 /var/lib/pgsql/11/data 0 0 172.27.0.178 1 5432 /var/lib/pgsql/11/data
+Warning: Permanently added '172.27.0.178' (ECDSA) to the list of known hosts.
+waiting for server to promote.... done
+server promoted
+2022-04-20 17:25:08.581: sr_check_worker pid 13658: ERROR:  Failed to check replication time lag
+2022-04-20 17:25:08.581: sr_check_worker pid 13658: DETAIL:  No persistent db connection for the node 1
+2022-04-20 17:25:08.581: sr_check_worker pid 13658: HINT:  check sr_check_user and sr_check_password
+2022-04-20 17:25:08.581: sr_check_worker pid 13658: CONTEXT:  while checking replication time lag
+failover.sh: end: failover success; node1 -> node0; Wed Apr 20 17:25:09 KST 2022
+2022-04-20 17:25:09.677: main pid 12535: LOG:  find_primary_node_repeatedly: waiting for finding a primary node
+2022-04-20 17:25:09.681: main pid 12535: LOG:  find_primary_node: primary node is 0
+2022-04-20 17:25:09.681: main pid 12535: LOG:  starting follow degeneration. shutdown host 172.27.1.10(5432)
+2022-04-20 17:25:09.699: main pid 12535: LOG:  failover: 1 follow backends have been degenerated
+2022-04-20 17:25:09.700: main pid 12535: LOG:  failover: set new primary node: 0
+2022-04-20 17:25:09.700: main pid 12535: LOG:  failover: set new main node: 0
+failover done. shutdown host 172.27.1.10(5432)2022-04-20 17:25:09.700: main pid 12535: LOG:  failover done. shutdown host 172.27.1.10(5432)
+-----
+
+- pgbench 결과 +
+결과 수치로는 부하가 들어가는 상태에서 pgpool에서 failover가 일어나면 Master에 있는 쿼리들이 손실됩니다.
+-----
+[postgres@PG-Cent76-8C16G:pgpool-II]$ pgbench -S -S -c 20 -j 4 -t 20000
+starting vacuum...end.
+client 8 aborted in command 1 (SQL) of script 1; perhaps the backend died while processing
+client 11 aborted in command 1 (SQL) of script 1; perhaps the backend died while processing
+client 13 aborted in command 1 (SQL) of script 0; perhaps the backend died while processing
+client 1 aborted in command 1 (SQL) of script 0; perhaps the backend died while processing
+transaction type: multiple scripts
+scaling factor: 10
+query mode: simple
+number of clients: 20
+number of threads: 4
+number of transactions per client: 20000
+number of transactions actually processed: 324415/400000
+-----
+
+=== 2node failback
+
+- 네트워크 복구
+-----
+ifcfg eth0:1 172.27.0.178
+-----
+
+- node 복구
+-----
+[postgres@PG-Cent76-8C16G:pgpool-II]$ pcp_recovery_node -n 0
+Password: 
+pcp_recovery_node -- Command Successful
+-----
+
+- recovery.log
+-----
+Thu Apr 21 11:02:08 KST 2022 : recovery_1st_stage: start
+PRIMARY: PGDATA=/var/lib/pgsql/11/data, PORT=5432, HOSTNAME=172.27.1.10
+DEST : PGDATA=/var/lib/pgsql/11/data, PORT=5432, HOSTNAME=172.27.0.178
+Thu Apr 21 11:02:12 KST 2022 recovery_1st_stage: end: recovery_1st_stage is completed successfully
+-----
+
+=== 3node failover
+
+=== 3node failback
+
+== Disk Connection fail
+
+-----
+#disk mount
+mount /dev/xvdb1 /var/lib/pgsql/11/data
+-----
+
+[%header, width="100%", cols="1,9"]
+|===============
+|no| 시나리오
+|1 | pgbench로 30초 쿼리 수행
+|2 | Disk 연결 끊기
+|3 | pgpool에서 node확인
+|4 | 기존 Standby 서버 확인
+|===============
+
+=== 2node failover
+
+- Disk remove
+-----
+rm -rf /var/lib/pgsql/11/data
+-----
+
+- pgbench 수행 중 Disk remove
+-----
+[postgres@PG-Cent76-8C16G:pgpool-II]$ pgbench -S -S -c 20 -j 4 -t 20000
+starting vacuum...end.
+client 10 aborted in command 1 (SQL) of script 1; ERROR:  could not open file "base/13881/3455": No such file or directory
+CONTEXT:  writing block 4 of relation base/13881/3455
+
+client 5 aborted in command 1 (SQL) of script 0; ERROR:  could not open file "base/13881/3455": No such file or directory
+CONTEXT:  writing block 4 of relation base/13881/3455
+
+WARNING:  could not write block 4 of base/13881/3455
+DETAIL:  Multiple failures --- write error might be permanent.
+client 12 aborted in command 1 (SQL) of script 0; ERROR:  could not open file "base/13881/3455": No such file or directory
+CONTEXT:  writing block 4 of relation base/13881/3455
+
+client 11 aborted in command 1 (SQL) of script 1; ERROR:  could not open file "base/13881/3455": No such file or directory
+CONTEXT:  writing block 4 of relation base/13881/3455
+
+client 15 aborted in command 1 (SQL) of script 1; ERROR:  could not open file "base/13881/1259": No such file or directory
+CONTEXT:  writing block 0 of relation base/13881/1259
+
+client 4 aborted in command 1 (SQL) of script 1; ERROR:  could not open file "base/13881/2663": No such file or directory
+CONTEXT:  writing block 2 of relation base/13881/2663
+
+client 9 aborted in command 1 (SQL) of script 0; ERROR:  could not open file "base/13881/2662": No such file or directory
+CONTEXT:  writing block 2 of relation base/13881/2662
+
+client 19 aborted in command 1 (SQL) of script 0; ERROR:  could not open file "base/13881/3455": No such file or directory
+CONTEXT:  writing block 4 of relation base/13881/3455
+
+client 17 aborted in command 1 (SQL) of script 0; perhaps the backend died while processing
+client 18 aborted in command 1 (SQL) of script 1; perhaps the backend died while processing
+client 1 aborted in command 1 (SQL) of script 0; perhaps the backend died while processing
+client 2 aborted in command 1 (SQL) of script 1; perhaps the backend died while processing
+client 0 aborted in command 1 (SQL) of script 1; perhaps the backend died while processing
+client 3 aborted in command 1 (SQL) of script 0; perhaps the backend died while processing
+client 6 aborted in command 1 (SQL) of script 0; perhaps the backend died while processing
+client 7 aborted in command 1 (SQL) of script 0; perhaps the backend died while processing
+client 8 aborted in command 1 (SQL) of script 0; perhaps the backend died while processing
+client 13 aborted in command 1 (SQL) of script 0; perhaps the backend died while processing
+client 16 aborted in command 1 (SQL) of script 1; perhaps the backend died while processing
+client 14 aborted in command 1 (SQL) of script 1; perhaps the backend died while processing
+transaction type: multiple scripts
+scaling factor: 10
+query mode: simple
+number of clients: 20
+number of threads: 4
+number of transactions per client: 20000
+number of transactions actually processed: 229477/400000
+latency average = 0.553 ms
+tps = 36137.364560 (including connections establishing)
+tps = 36157.609452 (excluding connections establishing)
+SQL script 1: <builtin: select only>
+ - weight: 1 (targets 50.0% of total)
+ - 114454 transactions (49.9% of total, tps = 18023.880055)
+ - latency average = 0.436 ms
+ - latency stddev = 0.152 ms
+SQL script 2: <builtin: select only>
+ - weight: 1 (targets 50.0% of total)
+ - 114871 transactions (50.1% of total, tps = 18089.547991)
+ - latency average = 0.435 ms
+ - latency stddev = 0.158 ms
+-----
+
+- pgpool에서 node 확인
+
+-----
+[postgres@PG-Cent76-8C16G:pgpool-II]$ pcp_node_info
+Password: 
+172.27.0.178 5432 3 0.500000 down down standby unknown 0 none none 2022-04-21 15:27:31
+172.27.1.10 5432 2 0.500000 up up primary primary 0 none none 2022-04-21 15:27:31
+-----
+
+- 기존 Standby 확인
+
+-----
+[postgres@PG-Cent76-4C8G-Rep3:log]$ psql -c "select pg_is_in_recovery();"
+ pg_is_in_recovery 
+-------------------
+ f
+(1 row)
+-----
+
+=== 2node failback
+
+- disk가 없어진 서버 상태 확인
+
+------
+[postgres@PG-Cent76-4C8G-Rep1:~]$ pg_ctl status
+pg_ctl: directory "/var/lib/pgsql/11/data" is not a database cluster directory
+------
+
+== insert 무한반복(I/O Fencing)
+-----
+vi dml.sh
+for (( i=0; i< 100; i++ ))
+do
+ tbsql sys/tibero@tac_vip << EOF
+ @/root/dml.sql
+EOF
+done
+vi dml.sql
+insert into DMTB
+select level as col1,
+ TO_CHAR( TO_DATE('20210101', 'YYYY-MM-DD~') + ROWNUM-1, 'YYYY-MM-DD~') as
+col2,
+ TO_CHAR( TO_DATE('20210101', 'YYYY-MM-DD HH24:MI') + (ROWNUM-1)/24, 'YYYYMM-DD HH24:MI') as col3
+ from dual
+connect by level <= 1000;
+또는 tbsql sys/tibero@tac_vip
+SQL > loop @dml.sql
+
+-----
+
+== Server shutdown
+
+== pgpool down
+
+== vip failover(KT)
+
+== session failover
+
+=== 2node failover
+
+- 세션 확인
+-----
+pgbench -p 9999 -S -S -c 20 -j 4 -T 10
+
+select datname, state, query, client_addr  from pg_stat_activity where datname='postgres';
+
+\watch 1
+-----
+
+=== 2node failback
+
+=== 3node failover
+
+=== 3node failback
