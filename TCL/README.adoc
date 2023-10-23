@@ -1,0 +1,228 @@
+= TCL
+:toc:
+:toc-title: 목차
+
+== *1. 테스트환경*
+
+=== Windows
+|=======
+| OS | Windows 10 21H2
+| PostgreSQL Version | PostgreSQL 14.2
+| TCL Version | TCL 8.6.12
+| Driver Version | pgtcl 2.8.0
+|=======
+
+
+=== Linux
+|=======
+| OS | CentOS 7.6
+| PostgreSQL Version | PostgreSQL 14.2
+| TCL Version | TCL 8.6.12
+| Driver Version | pgtcl 2.8.0
+|=======
+
+== *2. 지원범위*
+=== License
+*Free BSD-3*
+
+=== Supported Version
+*PostgreSQL 9.2 or later*
+
+== *3. 테스트 환경 구축*
+=== Windows
+*추가예정*
+ 
+=== Linux
+==== *3.1. TCL 설치* +
+
+*3.1.1. TCL-8.6.12 소스 다운로드* 
+아래의 링크에서 tcl8.6.12 소스 다운로드 - TK는 설치하지 않아도 테스트 가능 + 
+https://www.tcl.tk/software/tcltk/download.html + 
+ + 
+
+*3.1.2. TCL 컴파일*
+[source,sh]
+#디렉토리 생성 및 압축해제
+mkdir -p /hypersql/interface/src
+tar xvzf tcl8.6.12-src.tar.gz -C /hypersql/interface/src
+
+[source,sh]
+#컴파일
+mkdir -p /hypersql/interface/tcl/tcl-8.6.12
+cd /hypersql/interface/src
+chmod 755 tcl8.6.12 -R
+cd tcl8.6.12
+cd unix
+./configure --prefix=/hypersql/interface/tcl/tcl-8.6.12
+make
+make install
+
+==== *3.2. pgtcl 설치*
+*3.2.1. pgtcl 2.8.0 소스 다운로드* 
+아래의 링크에서 pgtcl 2.8.0 다운로드 + 
+https://github.com/flightaware/Pgtcl/releases
+
+*3.2.2. pgtcl 컴파일*
+[source,sh]
+#디렉토리 생성 및 압축해제
+tar xvzf Pgtcl-2.8.0.tar.gz -C /hypersql/interface/src
+cd /hypersql/interface/src
+
+`autoreconf` 명령어를 사용하기 위해서는 `autoconf` 패키지가 필요합니다. 해당 명령어가 없을 시 설치한 후 진행합니다.
+
+`yum install autoconf`
+
+[source,sh]
+#컴파일
+chmod 755 Pgtcl-2.8.0 -R
+cd Pgtcl-2.8.0
+autoreconf
+./configure --prefix=/hypersql/interface/tcl/tcl-8.6.12 --with-postgres-include=/usr/pgsql-14/include --with-postgres-lib=/usr/pgsql-14/lib --with-tcl=/hypersql/interface/tcl/tcl-8.6.12/lib --with-tclinclude=/hypersql/interface/tcl/tcl-8.6.12/include
+make
+make install
+
+==== *3.3. 테스트 프로젝트 생성*
+*3.3.1. pgtcl* + 
+[source, sh]
+----
+vi pgtcl.tcl
+---- 
+
+pgtcl.tcl
+[source, tcl]
+----
+package require Pgtcl
+
+ proc connectDB { {host "127.0.0.1"} {port "5432"} {db "postgres"} {user "postgres"} {password "1234"} } {
+     set conn [pg_connect $db -host $host -port $port -user $user -password $password]
+     set conninfo [pg_dbinfo status $conn]
+     puts $conninfo
+     return $conn
+ }
+
+ proc getDBs { conn query } {
+     # datnames is the list to be result
+     set res [pg_exec $conn "$query"]
+     set ntups [pg_result $res -numTuples]
+     for {set i 0} {$i < $ntups} {incr i} {
+         lappend datnames [pg_result $res -getTuple $i]
+     }
+     pg_result $res -clear
+     pg_disconnect $conn
+     return $datnames
+}
+
+ puts "host 입력"
+ gets stdin host
+ puts "port 입력"
+ gets stdin port
+ puts "db명 입력"
+ gets stdin db
+ puts "user명 입력"
+ gets stdin user
+ puts "password 입력"
+ gets stdin password
+ set conn [connectDB $host $port $db $user $password]
+ puts "query 입력"
+ gets stdin query
+ puts [getDBs $conn $query]
+----
+
+*3.3.2. tdbc* + 
+[source, sh]
+----
+vi tdbc.tcl
+---- 
+
+tdbc.tcl
+[source, tcl]
+----
+package require tdbc::postgres
+puts "host 입력"
+gets stdin host
+puts "port 입력"
+gets stdin port
+puts "db명 입력"
+gets stdin db
+puts "user명 입력"
+gets stdin user
+puts "password 입력"
+gets stdin password
+
+tdbc::postgres::connection create db -host $host -port $port -user $user -password $password -db $db
+
+puts "query 입력"
+gets stdin query
+db foreach rec $query {
+    puts $rec
+}
+db close
+----
+
+==== *3.4. 테스트 진행 및 결과*
+tcl binary 디렉토리를 환경변수 PATH 또는 alias에 등록하시면 편합니다. + 
+저는 alias를 사용하는 방식으로 진행하겠습니다. + 
+`vi ~/.bash_profile`  + 
+제일 하단에, 아래의 내용 추가 후 저장 + 
+`alias tclsh='/hypersql/interface/tcl/tcl-8.6.12/bin/tclsh8.6'`  + 
+
+==== *주의사항*
+tdbc의 경우, 쿼리 입력시에 ;(세미콜론)을 입력하게 되면, 오류가 발생합니다. + 
+따라서, 쿼리 입력시에 ;을 넣지 않거나 후처리 하는 방법으로 사용하시면 됩니다.
+
+[source, sh]
+----
+tclsh pgtcl.tcl
+tclsh tdbc.tcl
+----
+
+==== *결과*
+*pgtcl.tcl*
+[source, sh]
+----
+host 입력
+127.0.0.1
+port 입력
+5432
+db명 입력
+postgres
+user명 입력
+postgres
+password 입력
+1234
+connection_ok
+query 입력
+select * from one limit 5
+{1 Kiah Beales kbeales0@nifty.com Female 140.139.182.23 {{"name":"추다진","age":"1","Product":{"pens":1495,"notes":2328}}} 69b40fb60ccb4ad4f781e48130cf6734} {2 Daryle Armall darmall1@umich.edu Male 131.227.113.151 {{"name":"백효리","age":"2","Product":{"pens":1697,"notes":2404}}} 69ae4a5ea38f1f4b4f768390f49a829b} {3 Gare Vacher gvacher2@angelfire.com Male 130.229.128.29 {{"name":"신채예","age":"3","Product":{"pens":2771,"notes":123}}} 13c31690dbaa4ff3bab5ab202a714a50} {4 Elissa Ianilli eianilli3@macromedia.com Female 167.226.206.250 {{"name":"지하소","age":"4","Product":{"pens":1415,"notes":2504}}} 703b975fc6e3d952ff49bda3e75d0492} {5 Danit Romi dromi4@dagondesign.com Female 148.169.97.249 {{"name":"나조승","age":"5","Product":{"pens":1932,"notes":683}}} d650638f5f8ef81903f28cff1049a4ef}
+----
+
++ 
+*tdbc.tcl*
+[source, sh]
+----
+host 입력
+127.0.0.1
+port 입력
+5432
+db명 입력
+postgres
+user명 입력
+postgres
+password 입력
+1234
+query 입력
+select * from one limit 5
+id 1 first_name Kiah last_name Beales email kbeales0@nifty.com gender Female ip_address 140.139.182.23 info {{"name":"추다진","age":"1","Product":{"pens":1495,"notes":2328}}} en_first_name 69b40fb60ccb4ad4f781e48130cf6734
+id 2 first_name Daryle last_name Armall email darmall1@umich.edu gender Male ip_address 131.227.113.151 info {{"name":"백효리","age":"2","Product":{"pens":1697,"notes":2404}}} en_first_name 69ae4a5ea38f1f4b4f768390f49a829b
+id 3 first_name Gare last_name Vacher email gvacher2@angelfire.com gender Male ip_address 130.229.128.29 info {{"name":"신채예","age":"3","Product":{"pens":2771,"notes":123}}} en_first_name 13c31690dbaa4ff3bab5ab202a714a50
+id 4 first_name Elissa last_name Ianilli email eianilli3@macromedia.com gender Female ip_address 167.226.206.250 info {{"name":"지하소","age":"4","Product":{"pens":1415,"notes":2504}}} en_first_name 703b975fc6e3d952ff49bda3e75d0492
+id 5 first_name Danit last_name Romi email dromi4@dagondesign.com gender Female ip_address 148.169.97.249 info {{"name":"나조승","age":"5","Product":{"pens":1932,"notes":683}}} en_first_name d650638f5f8ef81903f28cff1049a4ef
+----
+
+== 4. 참고 API
+*TDBC* + 
+`https://www.tcl-lang.org/man/tcl/TdbcpostgresCmd/contents.htm` + 
+ + 
+*pgtcl* + 
+`https://github.com/flightaware/Pgtcl` + 
+`https://flightaware.github.io/Pgtcl/html/index.html#AEN3`
